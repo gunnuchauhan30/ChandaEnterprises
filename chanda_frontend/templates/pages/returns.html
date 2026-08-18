@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}Returns - Chanda Enterprises{% endblock %}
+{% block page_title %}Returns & Adjustments{% endblock %}
+
+{% block content %}
+<div class="container-fluid" style="max-width: 1400px; margin: 0 auto;">
+    <div style="display: flex; justify-content: flex-end; margin-bottom: 20px;">
+        <a href="/returns/new" class="btn btn-primary"><i class="bi bi-plus"></i> New Return</a>
+    </div>
+
+    <div class="glass card-3d" style="padding: 24px; border-radius: 12px;">
+        <div class="table-container">
+            <table>
+                <thead>
+                    <tr><th>Return No</th><th>Material</th><th>Type</th><th>Qty</th><th>Return By</th><th>Reason</th><th>Date</th></tr>
+                </thead>
+                <tbody id="returnsBody">
+                    <tr><td colspan="7" style="text-align: center; padding: 30px; color: #999;">
+                        <div class="spinner"></div><div style="margin-top: 10px;">Loading returns...</div>
+                    </td></tr>
+                </tbody>
+            </table>
+        </div>
+        <div style="display: flex; justify-content: center; align-items: center; gap: 10px; margin-top: 20px;">
+            <button onclick="previousPage()" class="btn btn-secondary btn-sm">← Previous</button>
+            <span id="pageInfo" style="color: var(--text-lighter);">Page 1</span>
+            <button onclick="nextPage()" id="nextBtn" class="btn btn-secondary btn-sm">Next →</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    let currentPage = 1;
+    const pageSize = 20;
+
+    document.addEventListener('DOMContentLoaded', () => loadReturns());
+
+    async function loadReturns() {
+        const response = await API.getReturns(currentPage, pageSize);
+        const tbody = document.getElementById('returnsBody');
+        tbody.innerHTML = '';
+        if (!response) return;
+
+        if (response.items && response.items.length > 0) {
+            response.items.forEach(r => {
+                const row = tbody.insertRow();
+                row.innerHTML = `
+                    <td>${r.return_no}</td>
+                    <td>${r.material_code}</td>
+                    <td><span class="badge badge-info">${r.return_type}</span></td>
+                    <td>${r.qty ?? r.adjustment_qty ?? '-'}</td>
+                    <td>${r.returned_by_name || '-'}</td>
+                    <td>${r.reason || '-'}</td>
+                    <td>${formatDate(r.created_at)}</td>
+                `;
+            });
+            document.getElementById('pageInfo').textContent = `Page ${currentPage}`;
+            document.getElementById('nextBtn').disabled = response.items.length < pageSize;
+        } else {
+            tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: #999;">No returns found</td></tr>';
+        }
+    }
+
+    function nextPage() { currentPage++; loadReturns(); }
+    function previousPage() { if (currentPage > 1) currentPage--; loadReturns(); }
+</script>
+{% endblock %}

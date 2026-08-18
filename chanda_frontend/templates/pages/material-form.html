@@ -1,0 +1,149 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Edit' if action == 'edit' else 'New' }} Material - Chanda Enterprises{% endblock %}
+{% block page_title %}{{ 'Edit Material' if action == 'edit' else 'New Material' }}{% endblock %}
+
+{% block content %}
+<div class="container-fluid" style="max-width: 900px; margin: 0 auto;">
+    <div class="glass card-3d" style="padding: 30px; border-radius: 12px;">
+        <form id="materialForm">
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+                <div class="form-group">
+                    <label for="material_code">Material Code *</label>
+                    <input type="text" id="material_code" required maxlength="30" placeholder="e.g. RM-STEEL-001">
+                </div>
+                <div class="form-group">
+                    <label for="material_name">Material Name *</label>
+                    <input type="text" id="material_name" required maxlength="200">
+                </div>
+                <div class="form-group">
+                    <label for="category">Category</label>
+                    <input type="text" id="category">
+                </div>
+                <div class="form-group">
+                    <label for="material_type">Type *</label>
+                    <select id="material_type">
+                        <option value="PRODUCTION">Production</option>
+                        <option value="CONSUMABLE">Consumable</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="grade">Grade</label>
+                    <input type="text" id="grade">
+                </div>
+                <div class="form-group">
+                    <label for="size">Size</label>
+                    <input type="text" id="size">
+                </div>
+                <div class="form-group">
+                    <label for="uom">UOM *</label>
+                    <input type="text" id="uom" value="NOS" required>
+                </div>
+                <div class="form-group">
+                    <label for="unit_cost">Unit Cost (₹)</label>
+                    <input type="number" id="unit_cost" step="0.01" min="0" value="0">
+                </div>
+                <div class="form-group">
+                    <label for="min_qty">Min Stock Qty</label>
+                    <input type="number" id="min_qty" step="0.01" min="0">
+                </div>
+                <div class="form-group">
+                    <label for="max_qty">Max Stock Qty</label>
+                    <input type="number" id="max_qty" step="0.01" min="0">
+                </div>
+                <div class="form-group" id="openingQtyGroup">
+                    <label for="opening_qty">Opening Qty</label>
+                    <input type="number" id="opening_qty" step="0.01" min="0" value="0">
+                </div>
+                <div class="form-group">
+                    <label for="per_day_req">Per-Day Requirement</label>
+                    <input type="number" id="per_day_req" step="0.01" min="0">
+                </div>
+                <div class="form-group">
+                    <label for="warehouse">Warehouse</label>
+                    <input type="text" id="warehouse">
+                </div>
+                <div class="form-group">
+                    <label for="rack">Rack</label>
+                    <input type="text" id="rack">
+                </div>
+                <div class="form-group">
+                    <label for="bin">Bin</label>
+                    <input type="text" id="bin">
+                </div>
+                <div class="form-group">
+                    <label for="supplier_id">Supplier</label>
+                    <select id="supplier_id"><option value="">-- None --</option></select>
+                </div>
+                <div class="form-group">
+                    <label for="hsn_code">HSN Code</label>
+                    <input type="text" id="hsn_code">
+                </div>
+                <div class="form-group">
+                    <label for="lead_time_days">Lead Time (days)</label>
+                    <input type="number" id="lead_time_days" min="0" value="0">
+                </div>
+                <div class="form-group">
+                    <label for="status">Status</label>
+                    <select id="status">
+                        <option value="active">Active</option>
+                        <option value="inactive">Inactive</option>
+                    </select>
+                </div>
+            </div>
+
+            <div style="display: flex; gap: 12px; margin-top: 10px;">
+                <button type="submit" class="btn btn-primary"><i class="bi bi-check-lg"></i> Save Material</button>
+                <a href="/materials" class="btn btn-secondary">Cancel</a>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+    const action = '{{ action }}';
+
+    document.addEventListener('DOMContentLoaded', async () => {
+        const suppliers = await API.getSuppliers(1, 200);
+        const sel = document.getElementById('supplier_id');
+        if (suppliers && suppliers.items) {
+            suppliers.items.forEach(s => {
+                const opt = document.createElement('option');
+                opt.value = s.id;
+                opt.textContent = s.supplier_name;
+                sel.appendChild(opt);
+            });
+        }
+    });
+
+    document.getElementById('materialForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const payload = {
+            material_code: document.getElementById('material_code').value,
+            material_name: document.getElementById('material_name').value,
+            category: document.getElementById('category').value || null,
+            material_type: document.getElementById('material_type').value,
+            grade: document.getElementById('grade').value || null,
+            size: document.getElementById('size').value || null,
+            uom: document.getElementById('uom').value,
+            unit_cost: parseFloat(document.getElementById('unit_cost').value) || 0,
+            min_qty: document.getElementById('min_qty').value ? parseFloat(document.getElementById('min_qty').value) : null,
+            max_qty: document.getElementById('max_qty').value ? parseFloat(document.getElementById('max_qty').value) : null,
+            opening_qty: parseFloat(document.getElementById('opening_qty').value) || 0,
+            per_day_req: document.getElementById('per_day_req').value ? parseFloat(document.getElementById('per_day_req').value) : null,
+            warehouse: document.getElementById('warehouse').value || null,
+            rack: document.getElementById('rack').value || null,
+            bin: document.getElementById('bin').value || null,
+            supplier_id: document.getElementById('supplier_id').value || null,
+            hsn_code: document.getElementById('hsn_code').value || null,
+            lead_time_days: parseInt(document.getElementById('lead_time_days').value) || 0,
+            status: document.getElementById('status').value,
+        };
+
+        const result = await API.createMaterial(payload);
+        if (result) {
+            showAlert('Material created successfully', 'success');
+            setTimeout(() => window.location.href = '/materials', 800);
+        }
+    });
+</script>
+{% endblock %}

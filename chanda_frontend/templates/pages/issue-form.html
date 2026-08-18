@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block title %}New Issue - Chanda Enterprises{% endblock %}
+{% block page_title %}New Direct Issue{% endblock %}
+
+{% block content %}
+<div class="container-fluid" style="max-width: 700px; margin: 0 auto;">
+    <div class="glass card-3d" style="padding: 30px; border-radius: 12px;">
+        <form id="issueForm">
+            <div class="form-group">
+                <label for="material_code">Material *</label>
+                <select id="material_code" required><option value="">-- Select material --</option></select>
+            </div>
+            <div class="form-group">
+                <label for="issue_qty">Issue Quantity *</label>
+                <input type="number" id="issue_qty" step="0.01" min="0.01" required>
+            </div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+                <div class="form-group"><label for="job_card_no">Job Card No</label><input type="text" id="job_card_no"></div>
+                <div class="form-group"><label for="production_order_no">Production Order No</label><input type="text" id="production_order_no"></div>
+                <div class="form-group"><label for="part_number">Part Number</label><input type="text" id="part_number"></div>
+                <div class="form-group"><label for="machine">Machine</label><input type="text" id="machine"></div>
+                <div class="form-group"><label for="operation">Operation</label><input type="text" id="operation"></div>
+                <div class="form-group"><label for="department">Department</label><input type="text" id="department"></div>
+                <div class="form-group"><label for="shift">Shift</label><input type="text" id="shift"></div>
+                <div class="form-group"><label for="required_qty">Required Qty</label><input type="number" id="required_qty" step="0.01"></div>
+            </div>
+            <div class="form-group"><label for="remark">Remark</label><textarea id="remark"></textarea></div>
+            <div style="display: flex; gap: 12px;">
+                <button type="submit" class="btn btn-primary"><i class="bi bi-check-lg"></i> Issue Material</button>
+                <a href="/issues" class="btn btn-secondary">Cancel</a>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+    document.addEventListener('DOMContentLoaded', async () => {
+        const materials = await API.getMaterials(1, 500);
+        const sel = document.getElementById('material_code');
+        if (materials && materials.items) {
+            materials.items.forEach(m => {
+                const opt = document.createElement('option');
+                opt.value = m.material_code;
+                opt.textContent = `${m.material_code} - ${m.material_name} (avail: ${m.available_qty})`;
+                sel.appendChild(opt);
+            });
+        }
+    });
+
+    document.getElementById('issueForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const payload = {
+            material_code: document.getElementById('material_code').value,
+            issue_qty: parseFloat(document.getElementById('issue_qty').value),
+            job_card_no: document.getElementById('job_card_no').value || null,
+            production_order_no: document.getElementById('production_order_no').value || null,
+            part_number: document.getElementById('part_number').value || null,
+            machine: document.getElementById('machine').value || null,
+            operation: document.getElementById('operation').value || null,
+            department: document.getElementById('department').value || null,
+            shift: document.getElementById('shift').value || null,
+            required_qty: document.getElementById('required_qty').value ? parseFloat(document.getElementById('required_qty').value) : null,
+            remark: document.getElementById('remark').value || null,
+        };
+        const result = await API.createIssue(payload);
+        if (result) {
+            showAlert(`Issue ${result.issue_no} created`, 'success');
+            setTimeout(() => window.location.href = '/issues', 800);
+        }
+    });
+</script>
+{% endblock %}

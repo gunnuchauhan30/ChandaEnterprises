@@ -1,0 +1,271 @@
+{% extends "base.html" %}
+{% block title %}New Request - Chanda Enterprises{% endblock %}
+{% block page_title %}New Material Request{% endblock %}
+
+{% block content %}
+<div class="container-fluid" style="max-width: 900px; margin: 0 auto;">
+    <div class="glass card-3d" style="padding: 30px; border-radius: 12px;">
+        <form id="requestForm">
+            <!-- Request Header Info -->
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 24px;">
+                <div class="form-group">
+                    <label for="department">Department *</label>
+                    <input type="text" id="department" required>
+                </div>
+                <div class="form-group">
+                    <label for="job_card_no">Job Card No</label>
+                    <input type="text" id="job_card_no">
+                </div>
+            </div>
+
+            <!-- Multiple Items Selection -->
+            <h3 style="color: var(--accent-purple); font-size:16px; margin-bottom:16px;">Add Materials</h3>
+            
+            <!-- Add New Item Row -->
+            <div style="display: grid; grid-template-columns: 2fr 1fr 80px; gap: 12px; margin-bottom: 16px;">
+                <div class="form-group" style="margin-bottom: 0;">
+                    <label for="material_search">Material (Type to search)</label>
+                    <div style="position: relative;">
+                        <input type="text" id="material_search" placeholder="Type code or name..." 
+                               style="width: 100%; padding: 10px 14px; background: var(--glass-dark); border: 1px solid var(--glass-medium); border-radius: 6px; color: var(--text-light);">
+                        <div id="materialSuggestions" style="position: absolute; top: 100%; left: 0; right: 0; background: var(--glass-medium); border: 1px solid var(--glass-medium); border-radius: 6px; max-height: 200px; overflow-y: auto; display: none; z-index: 1000; margin-top: 4px;"></div>
+                    </div>
+                </div>
+                <div class="form-group" style="margin-bottom: 0;">
+                    <label for="add_qty">Quantity *</label>
+                    <input type="number" id="add_qty" step="0.01" min="0.01" placeholder="0" style="width: 100%; padding: 10px 14px; background: var(--glass-dark); border: 1px solid var(--glass-medium); border-radius: 6px; color: var(--text-light);">
+                </div>
+                <div style="display: flex; align-items: flex-end;">
+                    <button type="button" onclick="addLineItem()" class="btn btn-primary" style="width: 100%;">
+                        <i class="bi bi-plus-lg"></i> Add
+                    </button>
+                </div>
+            </div>
+
+            <!-- Selected Items Table -->
+            <div id="itemsTable" style="display: none;">
+                <div class="table-container" style="margin-bottom: 20px;">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Material Code</th>
+                                <th>Name</th>
+                                <th>Available</th>
+                                <th>Qty Requested</th>
+                                <th>Status</th>
+                                <th>Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="lineItemsBody">
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div id="noItemsMsg" style="text-align: center; padding: 20px; color: var(--text-lighter); background: var(--glass-medium); border-radius: 6px;">
+                No items added yet. Add at least one material above.
+            </div>
+
+            <!-- Additional Details -->
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 24px;">
+                <div class="form-group">
+                    <label for="part_number">Part Number</label>
+                    <input type="text" id="part_number">
+                </div>
+            </div>
+            <div class="form-group">
+                <label for="purpose">Purpose/Remarks</label>
+                <textarea id="purpose" style="height: 80px;"></textarea>
+            </div>
+
+            <!-- Submit -->
+            <div style="display: flex; gap: 12px; margin-top: 24px;">
+                <button type="submit" class="btn btn-primary"><i class="bi bi-check-lg"></i> Submit Request</button>
+                <a href="/requests" class="btn btn-secondary">Cancel</a>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+    let allMaterials = [];
+    let materialAvailability = {};
+    let lineItems = []; // Array of {material_code, material_name, requested_qty, available_qty}
+
+    document.addEventListener('DOMContentLoaded', async () => {
+        const materials = await API.getMaterials(1, 500);
+        if (materials && materials.items) {
+            allMaterials = materials.items;
+            materials.items.forEach(m => {
+                materialAvailability[m.material_code] = m.available_qty;
+            });
+        }
+    });
+
+    // Searchable dropdown with type-ahead
+    document.getElementById('material_search').addEventListener('input', (e) => {
+        const search = e.target.value.toLowerCase().trim();
+        const sugBox = document.getElementById('materialSuggestions');
+        
+        if (search.length < 1) {
+            sugBox.style.display = 'none';
+            return;
+        }
+
+        const matches = allMaterials.filter(m => 
+            m.material_code.toLowerCase().includes(search) || 
+            m.material_name.toLowerCase().includes(search)
+        ).slice(0, 10); // Show top 10 matches
+
+        if (matches.length === 0) {
+            sugBox.style.display = 'none';
+            return;
+        }
+
+        sugBox.innerHTML = matches.map(m => `
+            <div style="padding: 12px 14px; border-bottom: 1px solid var(--glass-dark); cursor: pointer; transition: background 0.2s;" 
+                 onmouseover="this.style.background='var(--glass-dark)'" 
+                 onmouseout="this.style.background='transparent'"
+                 onclick="selectMaterial('${m.material_code}', '${m.material_name.replace(/'/g, "\\'")}', ${m.available_qty})">
+                <div style="font-weight: 500; color: var(--text-light);">${m.material_code} - ${m.material_name}</div>
+                <div style="font-size: 12px; color: var(--text-lighter);">Available: ${m.available_qty} ${m.uom}</div>
+            </div>
+        `).join('');
+        
+        sugBox.style.display = 'block';
+    });
+
+    function selectMaterial(code, name, available) {
+        document.getElementById('material_search').value = `${code} - ${name}`;
+        document.getElementById('add_qty').focus();
+        document.getElementById('materialSuggestions').style.display = 'none';
+        // Store selected material code for adding
+        document.getElementById('material_search').dataset.selectedCode = code;
+    }
+
+    function addLineItem() {
+        const search = document.getElementById('material_search').value.trim();
+        const selectedCode = document.getElementById('material_search').dataset.selectedCode;
+        const qty = parseFloat(document.getElementById('add_qty').value);
+
+        if (!selectedCode || !search) {
+            showAlert('Please select a material from the dropdown', 'danger');
+            return;
+        }
+        if (!qty || qty <= 0) {
+            showAlert('Please enter quantity', 'danger');
+            return;
+        }
+
+        // Check if material already added
+        if (lineItems.some(item => item.material_code === selectedCode)) {
+            showAlert('This material is already added. Edit or remove it first.', 'warning');
+            return;
+        }
+
+        const material = allMaterials.find(m => m.material_code === selectedCode);
+        if (!material) {
+            showAlert('Material not found', 'danger');
+            return;
+        }
+
+        lineItems.push({
+            material_code: selectedCode,
+            material_name: material.material_name,
+            requested_qty: qty,
+            available_qty: material.available_qty,
+            uom: material.uom
+        });
+
+        // Clear inputs
+        document.getElementById('material_search').value = '';
+        document.getElementById('material_search').dataset.selectedCode = '';
+        document.getElementById('add_qty').value = '';
+        document.getElementById('materialSuggestions').style.display = 'none';
+
+        renderLineItems();
+    }
+
+    function removeLineItem(index) {
+        lineItems.splice(index, 1);
+        renderLineItems();
+    }
+
+    function renderLineItems() {
+        const tbody = document.getElementById('lineItemsBody');
+        const table = document.getElementById('itemsTable');
+        const noMsg = document.getElementById('noItemsMsg');
+
+        if (lineItems.length === 0) {
+            table.style.display = 'none';
+            noMsg.style.display = 'block';
+            return;
+        }
+
+        table.style.display = 'block';
+        noMsg.style.display = 'none';
+
+        tbody.innerHTML = lineItems.map((item, idx) => {
+            const status = item.requested_qty > item.available_qty 
+                ? `<span class="badge badge-warning">Backorder (${(item.requested_qty - item.available_qty).toFixed(2)} pending)</span>`
+                : `<span class="badge badge-success">In Stock</span>`;
+            
+            return `
+                <tr>
+                    <td><strong>${item.material_code}</strong></td>
+                    <td>${item.material_name}</td>
+                    <td>${item.available_qty} ${item.uom}</td>
+                    <td><strong>${item.requested_qty}</strong></td>
+                    <td>${status}</td>
+                    <td>
+                        <button type="button" class="btn btn-sm btn-danger" onclick="removeLineItem(${idx})">
+                            <i class="bi bi-trash"></i>
+                        </button>
+                    </td>
+                </tr>
+            `;
+        }).join('');
+    }
+
+    document.getElementById('requestForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+
+        if (lineItems.length === 0) {
+            showAlert('Please add at least one material', 'danger');
+            return;
+        }
+
+        const department = document.getElementById('department').value.trim();
+        if (!department) {
+            showAlert('Department is required', 'danger');
+            return;
+        }
+
+        // Submit as array of items
+        const payload = {
+            department: department,
+            job_card_no: document.getElementById('job_card_no').value || null,
+            part_number: document.getElementById('part_number').value || null,
+            purpose: document.getElementById('purpose').value || null,
+            items: lineItems.map(item => ({
+                material_code: item.material_code,
+                requested_qty: item.requested_qty
+            }))
+        };
+
+        const result = await API.createRequest(payload);
+        if (result) {
+            showAlert(`Request ${result.request_no} submitted with ${lineItems.length} items`, 'success');
+            setTimeout(() => window.location.href = '/requests', 800);
+        }
+    });
+
+    // Allow Enter key to add item
+    document.getElementById('add_qty').addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            addLineItem();
+        }
+    });
+</script>
+{% endblock %}

@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block title %}Backorders - Chanda Enterprises{% endblock %}
+{% block page_title %}Backorder Queue (FIFO){% endblock %}
+
+{% block content %}
+<div class="container-fluid" style="max-width: 1400px; margin: 0 auto;">
+
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+        <p style="color: var(--text-lighter); margin:0; max-width: 650px; font-size: 13px;">
+            Requests that couldn't be fully issued because store didn't have enough stock.
+            Sorted oldest first (FIFO) -- the request that has been waiting longest gets
+            first claim on any new stock that comes in.
+        </p>
+        <a href="/requests" class="btn btn-secondary"><i class="bi bi-arrow-left"></i> All Requests</a>
+    </div>
+
+    <div class="glass card-3d" style="padding: 24px; border-radius: 12px;">
+        <div class="table-container">
+            <table>
+                <thead>
+                    <tr>
+                        <th>#</th><th>Request No</th><th>Material</th><th>Requested</th>
+                        <th>Fulfilled</th><th>Pending</th><th>Department</th><th>Waiting Since</th><th>Status</th><th>Action</th>
+                    </tr>
+                </thead>
+                <tbody id="backordersBody">
+                    <tr><td colspan="10" style="text-align:center; padding:30px; color:#999;">
+                        <div class="spinner"></div><div style="margin-top:10px;">Loading backorder queue...</div>
+                    </td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<script>
+    document.addEventListener('DOMContentLoaded', loadBackorders);
+
+    async function loadBackorders() {
+        const rows = await API.getBackorders();
+        const tbody = document.getElementById('backordersBody');
+        tbody.innerHTML = '';
+        const items = Array.isArray(rows) ? rows : (rows && rows.items) || [];
+        if (!items.length) {
+            tbody.innerHTML = '<tr><td colspan="10" style="text-align:center; color:#999;">No backorders right now -- every request has been fully issued 🎉</td></tr>';
+            return;
+        }
+        // Oldest-first ordering already comes from the API (FIFO), just render it with a rank number.
+        items.forEach((r, i) => {
+            const tr = tbody.insertRow();
+            const pending = r.pending_qty ?? (r.requested_qty - (r.fulfilled_qty || 0));
+            const color = r.status === 'partial' ? 'info' : 'warning';
+            tr.innerHTML = `
+                <td>${i + 1}</td>
+                <td>${r.request_no}</td>
+                <td>${r.material_name ? `${r.material_code} — ${r.material_name}` : r.material_code}</td>
+                <td>${r.requested_qty}</td>
+                <td>${r.fulfilled_qty ?? 0}</td>
+                <td><b>${pending}</b></td>
+                <td>${r.department || '-'}</td>
+                <td>${formatDateTime(r.created_at)}</td>
+                <td><span class="badge badge-${color}">${r.status}</span></td>
+                <td>
+                    <button class="btn btn-sm btn-primary" onclick="processMaterial('${r.material_code}', this)" title="Issue whatever is now available for this material, oldest requests first">
+                        <i class="bi bi-arrow-repeat"></i> Try Fulfill
+                    </button>
+                </td>
+            `;
+        });
+    }
+
+    async function processMaterial(materialCode, btn) {
+        // Guard against double-click / double-submit: two overlapping
+        // requests for the same material could otherwise race on issue
+        // numbering. Also stops accidentally double-issuing stock.
+        if (btn) { btn.disabled = true; }
+        try {
+            const result = await API.processBackorders(materialCode);
+            if (result) {
+                const settledCount = (result.settled || []).length;
+                if (settledCount > 0) {
+                    showAlert(`Fulfilled ${settledCount} request(s) for ${materialCode} from available stock`, 'success');
+                } else {
+                    showAlert(`No stock currently available for ${materialCode} -- still queued`, 'warning');
+                }
+                loadBackorders();
+            }
+        } finally {
+            if (btn) { btn.disabled = false; }
+        }
+    }
+</script>
+{% endblock %}

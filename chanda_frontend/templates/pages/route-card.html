@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+
+{% block title %}Route Card - Chanda Enterprises{% endblock %}
+{% block page_title %}Route Card{% endblock %}
+
+{% block content %}
+<div class="container-fluid" style="max-width: 1500px; margin: 0 auto;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 10px;">
+        <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+            <input type="date" id="dateFrom" style="padding: 10px 14px; background: var(--glass-dark); border: 1px solid var(--glass-medium); border-radius: 8px; color: var(--text-light);">
+            <input type="date" id="dateTo" style="padding: 10px 14px; background: var(--glass-dark); border: 1px solid var(--glass-medium); border-radius: 8px; color: var(--text-light);">
+            <input type="text" id="departmentFilter" placeholder="Department..." style="padding: 10px 14px; background: var(--glass-dark); border: 1px solid var(--glass-medium); border-radius: 8px; color: var(--text-light); width: 160px;">
+            <input type="text" id="jobCardFilter" placeholder="Job-Card No..." style="padding: 10px 14px; background: var(--glass-dark); border: 1px solid var(--glass-medium); border-radius: 8px; color: var(--text-light); width: 160px;">
+            <select id="shiftFilter" style="padding: 10px 14px; background: var(--glass-dark); border: 1px solid var(--glass-medium); border-radius: 8px; color: var(--text-light);">
+                <option value="">All Shifts</option>
+                <option value="DAY SHIFT">Day Shift</option>
+                <option value="Night Shift">Night Shift</option>
+            </select>
+            <button onclick="loadRouteCard()" class="btn btn-secondary"><i class="bi bi-funnel"></i> Filter</button>
+        </div>
+        <div style="display: flex; gap: 10px;">
+            <a href="/issues/new" class="btn btn-primary"><i class="bi bi-plus"></i> New Issue</a>
+            <button onclick="exportRouteCard()" class="btn btn-secondary"><i class="bi bi-download"></i> Export Excel</button>
+        </div>
+    </div>
+
+    <div class="glass card-3d" style="padding: 24px; border-radius: 12px;">
+        <div class="table-container">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Sr. No</th>
+                        <th>Date</th>
+                        <th>Part Name</th>
+                        <th>Issue Qty</th>
+                        <th>Job-Card No.</th>
+                        <th>Lot No.</th>
+                        <th>Issue By</th>
+                        <th>Department</th>
+                        <th>Remark</th>
+                        <th>Shift</th>
+                        <th>Received</th>
+                        <th>Print</th>
+                    </tr>
+                </thead>
+                <tbody id="routeCardBody">
+                    <tr><td colspan="12" style="text-align:center; padding: 30px; color:#999;"><div class="spinner"></div></td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<script>
+    document.addEventListener('DOMContentLoaded', () => {
+        // default to current month, like the company's Excel sheet is organized monthly
+        const today = new Date();
+        const first = new Date(today.getFullYear(), today.getMonth(), 1);
+        document.getElementById('dateFrom').value = first.toISOString().slice(0, 10);
+        document.getElementById('dateTo').value = today.toISOString().slice(0, 10);
+        loadRouteCard();
+    });
+
+    function buildFilters() {
+        const filters = {};
+        const dateFrom = document.getElementById('dateFrom').value;
+        const dateTo = document.getElementById('dateTo').value;
+        const department = document.getElementById('departmentFilter').value;
+        const jobCard = document.getElementById('jobCardFilter').value;
+        const shift = document.getElementById('shiftFilter').value;
+        if (dateFrom) filters.date_from = dateFrom;
+        if (dateTo) filters.date_to = dateTo;
+        if (department) filters.department = department;
+        if (jobCard) filters.job_card_no = jobCard;
+        if (shift) filters.shift = shift;
+        return filters;
+    }
+
+    async function loadRouteCard() {
+        const data = await API.getRouteCard(buildFilters());
+        const tbody = document.getElementById('routeCardBody');
+        tbody.innerHTML = '';
+        const rows = (data && data.items) ? data.items : [];
+
+        if (!rows.length) {
+            tbody.innerHTML = '<tr><td colspan="12" style="text-align:center; color:#999; padding:20px;">No issues found for this filter</td></tr>';
+            return;
+        }
+
+        rows.forEach(r => {
+            const tr = tbody.insertRow();
+            tr.innerHTML = `
+                <td>${r.sr_no}</td>
+                <td>${formatDate(r.date)}</td>
+                <td>${r.part_name}</td>
+                <td>${r.issue_qty}</td>
+                <td>${r.job_card_no || '-'}</td>
+                <td>${r.lot_no || '-'}</td>
+                <td>${r.issue_by}</td>
+                <td>${r.department || '-'}</td>
+                <td>${r.remark}</td>
+                <td>${r.shift || '-'}</td>
+                <td>${r.received ? '<span class="badge badge-success">Yes</span>' : '<span class="badge badge-warning">Pending</span>'}</td>
+                <td>${r.job_card_no ? `<a href="/route-card/print/${encodeURIComponent(r.job_card_no)}" target="_blank" class="btn btn-sm btn-secondary" title="Print this job card"><i class="bi bi-printer"></i></a>` : '-'}</td>
+            `;
+        });
+    }
+
+    async function exportRouteCard() {
+        const blob = await API.exportRouteCardExcel(buildFilters());
+        if (blob) {
+            downloadFile(blob, 'route-card.xlsx');
+            showAlert('Route card exported', 'success');
+        }
+    }
+</script>
+{% endblock %}

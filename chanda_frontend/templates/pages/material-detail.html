@@ -1,0 +1,194 @@
+{% extends "base.html" %}
+{% block title %}{{ material_code }} - Chanda Enterprises{% endblock %}
+{% block page_title %}Material: {{ material_code }}{% endblock %}
+
+{% block content %}
+<div class="container-fluid" style="max-width: 1200px; margin: 0 auto;">
+    <div id="materialCard" class="glass card-3d" style="padding: 24px; border-radius: 12px; margin-bottom: 20px;">
+        <div style="text-align:center; padding: 30px;"><div class="spinner"></div></div>
+    </div>
+
+    <!-- Point 2 & 13: Min/Max and Location are frequently-changed values, so they are
+         editable right here on the detail page instead of a separate form. -->
+    <div id="editCard" class="glass card-3d" style="padding: 24px; border-radius: 12px; margin-bottom: 20px; display:none;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+            <h3 style="margin:0; color: var(--accent-purple); font-size:16px;">Edit Stock Settings & Location</h3>
+            <span style="font-size:12px; color:var(--text-lighter);">Changes save immediately</span>
+        </div>
+        <div style="display:grid; grid-template-columns: repeat(5, 1fr); gap:16px;">
+            <div class="form-group">
+                <label for="edit_min_qty">Min Stock Qty</label>
+                <input type="number" id="edit_min_qty" step="0.01" min="0">
+            </div>
+            <div class="form-group">
+                <label for="edit_max_qty">Max Stock Qty</label>
+                <input type="number" id="edit_max_qty" step="0.01" min="0">
+            </div>
+            <div class="form-group">
+                <label for="edit_warehouse">Warehouse</label>
+                <input type="text" id="edit_warehouse">
+            </div>
+            <div class="form-group">
+                <label for="edit_rack">Rack</label>
+                <input type="text" id="edit_rack">
+            </div>
+            <div class="form-group">
+                <label for="edit_bin">Bin</label>
+                <input type="text" id="edit_bin">
+            </div>
+        </div>
+        <div style="margin-top:14px;">
+            <button class="btn btn-primary btn-sm" onclick="saveEdits()"><i class="bi bi-check-lg"></i> Save Changes</button>
+        </div>
+    </div>
+
+    <div class="glass card-3d" style="padding: 24px; border-radius: 12px;">
+        <div style="display: flex; gap: 10px; margin-bottom: 16px;">
+            <button class="btn btn-secondary btn-sm" onclick="showTab('ledger')" id="tabLedgerBtn">Stock Ledger</button>
+            <button class="btn btn-secondary btn-sm" onclick="showTab('lots')" id="tabLotsBtn">Lots / Batches</button>
+        </div>
+        <div id="ledgerTab" class="table-container">
+            <table>
+                <thead><tr><th>Date</th><th>Type</th><th>Qty</th><th>Balance</th><th>Reference</th></tr></thead>
+                <tbody id="ledgerBody"><tr><td colspan="5" style="text-align:center; padding:20px; color:#999;">Loading...</td></tr></tbody>
+            </table>
+        </div>
+        <!-- Update 3: every lot this material has ever come in on, oldest first
+             (same FIFO order stock actually gets consumed in) -- traceable
+             straight back to the GRN it came from, since Lot No. and GRN No.
+             now share the same number. -->
+        <div id="lotsTab" class="table-container" style="display:none;">
+            <table>
+                <thead><tr><th>Lot No.</th><th>Received</th><th>Received Qty</th><th>Remaining Qty</th><th>Unit Cost</th></tr></thead>
+                <tbody id="lotsBody"><tr><td colspan="5" style="text-align:center; padding:20px; color:#999;">Loading...</td></tr></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<script>
+    const materialCode = '{{ material_code }}';
+
+    document.addEventListener('DOMContentLoaded', async () => {
+        const mat = await API.getMaterial(materialCode);
+        const card = document.getElementById('materialCard');
+        if (!mat) {
+            card.innerHTML = '<div style="text-align:center; color:#999; padding:20px;">Material not found</div>';
+            return;
+        }
+        const statusBadge = mat.current_qty <= (mat.min_qty || 0) ? 'danger' : 'success';
+        card.innerHTML = `
+            <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom: 20px;">
+                <div>
+                    <h2 style="color: var(--accent-purple); margin: 0 0 4px;">${escapeHtml(mat.material_name)}</h2>
+                    <div style="color: var(--text-lighter); font-size: 13px;">${escapeHtml(mat.material_code)} · ${escapeHtml(mat.category || 'Uncategorized')}</div>
+                </div>
+                <span class="badge badge-${statusBadge}">${mat.status}</span>
+            </div>
+            <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap: 16px;">
+                <div class="glass-sm" style="padding:14px; border-radius:8px;">
+                    <div style="font-size:12px; color:var(--text-lighter);">Current Stock</div>
+                    <div style="font-size:22px; font-weight:700; color:var(--accent-purple);">${mat.current_qty} ${mat.uom}</div>
+                </div>
+                <div class="glass-sm" style="padding:14px; border-radius:8px;">
+                    <div style="font-size:12px; color:var(--text-lighter);">Available</div>
+                    <div style="font-size:22px; font-weight:700;">${mat.available_qty} ${mat.uom}</div>
+                </div>
+                <div class="glass-sm" style="padding:14px; border-radius:8px;">
+                    <div style="font-size:12px; color:var(--text-lighter);">Min / Max</div>
+                    <div style="font-size:16px;">${mat.min_qty ?? '-'} / ${mat.max_qty ?? '-'}</div>
+                </div>
+                <div class="glass-sm" style="padding:14px; border-radius:8px;">
+                    <div style="font-size:12px; color:var(--text-lighter);">Unit Cost</div>
+                    <div style="font-size:16px;">${formatCurrency(mat.unit_cost)}</div>
+                </div>
+            </div>
+            <div style="margin-top:16px; font-size:13px; color:var(--text-lighter);">
+                Location: ${mat.warehouse || '-'} / ${mat.rack || '-'} / ${mat.bin || '-'} &nbsp;•&nbsp;
+                Lead time: ${mat.lead_time_days} days &nbsp;•&nbsp; HSN: ${mat.hsn_code || '-'}
+                &nbsp;•&nbsp; <a href="#" onclick="toggleEdit(); return false;">Edit</a>
+            </div>
+        `;
+
+        document.getElementById('edit_min_qty').value = mat.min_qty ?? '';
+        document.getElementById('edit_max_qty').value = mat.max_qty ?? '';
+        document.getElementById('edit_warehouse').value = mat.warehouse ?? '';
+        document.getElementById('edit_rack').value = mat.rack ?? '';
+        document.getElementById('edit_bin').value = mat.bin ?? '';
+
+        loadLedger();
+    });
+
+    function toggleEdit() {
+        const card = document.getElementById('editCard');
+        card.style.display = card.style.display === 'none' ? 'block' : 'none';
+    }
+
+    async function saveEdits() {
+        const payload = {
+            min_qty: document.getElementById('edit_min_qty').value ? parseFloat(document.getElementById('edit_min_qty').value) : null,
+            max_qty: document.getElementById('edit_max_qty').value ? parseFloat(document.getElementById('edit_max_qty').value) : null,
+            warehouse: document.getElementById('edit_warehouse').value || null,
+            rack: document.getElementById('edit_rack').value || null,
+            bin: document.getElementById('edit_bin').value || null,
+        };
+        const result = await API.updateMaterial(materialCode, payload);
+        if (result) {
+            showAlert('Updated successfully', 'success');
+            setTimeout(() => window.location.reload(), 600);
+        }
+    }
+
+    async function loadLedger() {
+        const data = await API.getStockLedger(materialCode);
+        const tbody = document.getElementById('ledgerBody');
+        tbody.innerHTML = '';
+        if (data && data.items && data.items.length) {
+            data.items.forEach(row => {
+                const tr = tbody.insertRow();
+                tr.innerHTML = `
+                    <td>${formatDateTime(row.created_at)}</td>
+                    <td>${row.txn_type || row.movement_type || '-'}</td>
+                    <td>${row.qty}</td>
+                    <td>${row.balance_qty ?? '-'}</td>
+                    <td>${row.reference_no || '-'}</td>
+                `;
+            });
+        } else {
+            tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:#999;">No ledger entries yet</td></tr>';
+        }
+    }
+
+    function showTab(tab) {
+        document.getElementById('ledgerTab').style.display = tab === 'ledger' ? 'block' : 'none';
+        document.getElementById('lotsTab').style.display = tab === 'lots' ? 'block' : 'none';
+        if (tab === 'lots' && !window._lotsLoaded) {
+            window._lotsLoaded = true;
+            loadLots();
+        }
+    }
+
+    async function loadLots() {
+        // Update 3: shows every lot ever received for this material, not just
+        // ones with stock left, so it's a full traceability history.
+        const data = await API.getStockBatches(materialCode, false);
+        const tbody = document.getElementById('lotsBody');
+        tbody.innerHTML = '';
+        const items = Array.isArray(data) ? data : (data && data.items) || [];
+        if (!items.length) {
+            tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:#999;">No lots received yet</td></tr>';
+            return;
+        }
+        items.forEach(b => {
+            const tr = tbody.insertRow();
+            tr.innerHTML = `
+                <td>${b.batch_no || '-'}</td>
+                <td>${b.received_date ? formatDateTime(b.received_date) : '-'}</td>
+                <td>${b.received_qty}</td>
+                <td>${b.remaining_qty > 0 ? `<b>${b.remaining_qty}</b>` : '0 (used up)'}</td>
+                <td>${formatCurrency(b.unit_cost)}</td>
+            `;
+        });
+    }
+</script>
+{% endblock %}
