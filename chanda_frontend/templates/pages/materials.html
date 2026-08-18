@@ -75,13 +75,16 @@
         if (!response) return;
 
         // Point 3: pull the Critical Spares list so materials that also live on
-        // that separate page get a badge here -- pages stay separate, data links up.
-        let criticalCodes = new Set();
+        // that separate page get a badge here, and so the inline edit can toggle
+        // it directly from the Material Master row -- pages stay separate as
+        // data stores, but the master list is now the single place to manage it.
+        // Keyed by material_code -> the full spare record (need .id to update/delete).
+        window._criticalSpareMap = {};
         try {
             const spares = await API.getCriticalSpares();
             const spareItems = Array.isArray(spares) ? spares : (spares && spares.items) || [];
-            spareItems.forEach(s => criticalCodes.add(s.material_code));
-        } catch (e) { /* non-fatal, badge just won't show */ }
+            spareItems.forEach(s => { window._criticalSpareMap[s.material_code] = s; });
+        } catch (e) { /* non-fatal, badge/checkbox just won't show pre-filled */ }
 
         const tbody = document.getElementById('materialsBody');
         tbody.innerHTML = '';
@@ -91,7 +94,7 @@
                 const row = tbody.insertRow();
                 row.id = `matrow-${mat.material_code}`;
                 row.dataset.material = JSON.stringify(mat);
-                renderRowView(row, mat, criticalCodes.has(mat.material_code));
+                renderRowView(row, mat, !!window._criticalSpareMap[mat.material_code]);
             });
             document.getElementById('pageInfo').textContent = `Page ${currentPage}`;
             document.getElementById('nextBtn').disabled = response.items.length < pageSize;
@@ -145,6 +148,7 @@
     function renderRowEdit(materialCode) {
         const row = document.getElementById(`matrow-${materialCode}`);
         const mat = JSON.parse(row.dataset.material);
+        const spare = (window._criticalSpareMap || {})[materialCode];
         row.innerHTML = `
             <td>${mat.material_code}</td>
             <td>${mat.material_name}</td>
@@ -152,8 +156,17 @@
             <td><input type="text" id="edit_grade_${materialCode}" value="${esc(mat.grade)}" style="width:90px;"></td>
             <td>${mat.uom}</td>
             <td><input type="number" step="0.01" id="edit_stock_${materialCode}" value="${mat.current_qty}" style="width:90px;"></td>
-            <td>${mat.min_qty}/${mat.max_qty}</td>
-            <td>-</td>
+            <td>
+                <input type="number" step="0.01" min="0" id="edit_min_${materialCode}" value="${mat.min_qty ?? ''}" placeholder="Min" style="width:70px;">
+                /
+                <input type="number" step="0.01" min="0" id="edit_max_${materialCode}" value="${mat.max_qty ?? ''}" placeholder="Max" style="width:70px;">
+            </td>
+            <td>
+                <label style="display:flex; align-items:center; gap:4px; white-space:nowrap; cursor:pointer;" title="Mark this material as a Critical Spare -- it will show up on the Critical Spares page automatically">
+                    <input type="checkbox" id="edit_critical_${materialCode}" ${spare ? 'checked' : ''}>
+                    Critical
+                </label>
+            </td>
             <td><span class="badge badge-success">${mat.status}</span></td>
             <td style="white-space: nowrap;">
                 <button class="btn btn-sm btn-primary" title="Save" onclick="saveRowEdit('${materialCode}')">
@@ -178,17 +191,47 @@
         const newGrade = document.getElementById(`edit_grade_${materialCode}`).value.trim();
         const newStockRaw = document.getElementById(`edit_stock_${materialCode}`).value;
         const newStock = newStockRaw === '' ? null : parseFloat(newStockRaw);
+        const newMinRaw = document.getElementById(`edit_min_${materialCode}`).value;
+        const newMaxRaw = document.getElementById(`edit_max_${materialCode}`).value;
+        const newMin = newMinRaw === '' ? null : parseFloat(newMinRaw);
+        const newMax = newMaxRaw === '' ? null : parseFloat(newMaxRaw);
+        const wantsCritical = document.getElementById(`edit_critical_${materialCode}`).checked;
+        const existingSpare = (window._criticalSpareMap || {})[materialCode];
 
         try {
-            // Category / Grade go through the normal material update.
-            if (newCategory !== (mat.category || '') || newGrade !== (mat.grade || '')) {
-                await API.updateMaterial(materialCode, { category: newCategory || null, grade: newGrade || null });
+            // Category / Grade / Min / Max go through the normal material update.
+            const fieldUpdates = {};
+            if (newCategory !== (mat.category || '')) fieldUpdates.category = newCategory || null;
+            if (newGrade !== (mat.grade || '')) fieldUpdates.grade = newGrade || null;
+            if (newMin !== (mat.min_qty === null || mat.min_qty === undefined ? null : parseFloat(mat.min_qty))) fieldUpdates.min_qty = newMin;
+            if (newMax !== (mat.max_qty === null || mat.max_qty === undefined ? null : parseFloat(mat.max_qty))) fieldUpdates.max_qty = newMax;
+            if (Object.keys(fieldUpdates).length > 0) {
+                await API.updateMaterial(materialCode, fieldUpdates);
             }
             // Current stock is a real inventory movement, not a plain field edit --
             // it goes through the audited quick-adjust endpoint (creates + auto-approves
             // a stock reconciliation, same trusted path as Physical Count).
             if (newStock !== null && newStock !== parseFloat(mat.current_qty)) {
                 await API.quickAdjustStock(materialCode, newStock, 'Edited from Material Master list');
+            }
+            // Point 3: Critical Spare toggle -- tick the box here and it appears on
+            // the Critical Spares page automatically (and vice-versa on untick).
+            if (wantsCritical && !existingSpare) {
+                await API.createCriticalSpare({
+                    material_code: materialCode,
+                    machine_name: null,
+                    priority: 'critical',
+                    threshold_qty: newMin !== null ? newMin : (mat.min_qty || 0),
+                    remarks: 'Marked critical from Material Master list',
+                });
+            } else if (!wantsCritical && existingSpare) {
+                await API.deleteCriticalSpare(existingSpare.id);
+            } else if (wantsCritical && existingSpare) {
+                // Keep the spare's threshold in sync if Min Qty changed here.
+                const newThreshold = newMin !== null ? newMin : (mat.min_qty || 0);
+                if (parseFloat(existingSpare.threshold_qty) !== parseFloat(newThreshold)) {
+                    await API.updateCriticalSpare(existingSpare.id, { threshold_qty: newThreshold });
+                }
             }
             showAlert('Material updated', 'success');
         } catch (err) {

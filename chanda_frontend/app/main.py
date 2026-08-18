@@ -16,7 +16,14 @@ app.secret_key = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-producti
 app.config['TEMPLATES_AUTO_RELOAD'] = True
 
 # Frontend configuration
-BACKEND_URL = os.environ.get('BACKEND_URL', 'http://localhost:8000')
+# Point 7 fix (Aug-2026): os.environ.get(..., default) only applies the
+# default when the key is entirely ABSENT. If Railway (or docker-compose)
+# sets BACKEND_URL="" (present but empty), the old code kept the empty
+# string, producing window.RAILWAY_BACKEND_URL = "/api/v1" (missing host) in
+# base.html -- which then made api.js silently fail over to a hardcoded
+# wrong URL. Now we also strip whitespace and treat an empty result as
+# "unset" so the safe localhost default always kicks in.
+BACKEND_URL = (os.environ.get('BACKEND_URL') or '').strip() or 'http://localhost:8000'
 
 # ============================================
 # AUTHENTICATION DECORATORS

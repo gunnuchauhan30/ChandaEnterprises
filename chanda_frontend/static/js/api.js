@@ -6,7 +6,29 @@
    ============================================ */
 
 // const API_BASE_URL = 'http://localhost:8000/api/v1';
-const API_BASE_URL = window.RAILWAY_BACKEND_URL || 'https://chandaenterprises-production.up.railway.app/api/v1';
+// Point 7 fix (Aug-2026): the old fallback was a hardcoded URL belonging to a
+// DIFFERENT Railway deployment ('chandaenterprises-production...'). Whenever
+// window.RAILWAY_BACKEND_URL failed to render (BACKEND_URL env missing/empty
+// on the frontend service, or the base.html context processor not running on
+// a given page), every API call silently went to that stranger's backend
+// instead of this project's own backend -- that was the "Network error"
+// banner. Now: if the injected value is missing/blank/literally the string
+// "undefined", we fall back to a same-origin relative path ('/api/v1')
+// instead of someone else's domain, and we log a loud console error so the
+// real misconfiguration (BACKEND_URL not set in the frontend's .env) gets
+// noticed and fixed at the source instead of silently misrouting traffic.
+function resolveApiBaseUrl() {
+    const injected = window.RAILWAY_BACKEND_URL;
+    const isUsable = injected && injected !== 'undefined/api/v1' && !injected.startsWith('undefined');
+    if (isUsable) return injected;
+    console.error(
+        '[Chanda] BACKEND_URL was not injected correctly (window.RAILWAY_BACKEND_URL = "' +
+        injected + '"). Falling back to a relative /api/v1 path. Fix this by setting ' +
+        'BACKEND_URL in the frontend service .env / environment variables.'
+    );
+    return '/api/v1';
+}
+const API_BASE_URL = resolveApiBaseUrl();
 let authToken = localStorage.getItem('access_token');
 let currentUser = null;
 
@@ -511,15 +533,35 @@ function formatCurrency(value) {
     return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(value || 0);
 }
 
+// Point 2 fix (Aug-2026): the backend stores/sends timestamps as naive UTC
+// (Postgres server default, no offset in the JSON). The old code did
+// `new Date(dateString)` on that naive string -- JS then treats a string
+// with no 'Z'/offset as LOCAL time, not UTC, so the UTC clock value got
+// displayed as if it were already IST (no +5:30 shift applied). That's why
+// "Waiting Since" on the Backorder Queue showed times like 04:16 am instead
+// of the real ~09:46 am IST. Fix: explicitly mark the string as UTC before
+// parsing, then explicitly render it in the Asia/Kolkata timezone -- this is
+// correct regardless of which timezone the viewer's browser/OS is set to.
+function _parseAsUtc(dateString) {
+    if (!dateString) return null;
+    const hasOffset = /Z$|[+-]\d{2}:?\d{2}$/.test(dateString);
+    return new Date(hasOffset ? dateString : dateString + 'Z');
+}
+
 function formatDate(dateString) {
-    if (!dateString) return '-';
-    return new Date(dateString).toLocaleDateString('en-IN', { year: 'numeric', month: 'short', day: 'numeric' });
+    const d = _parseAsUtc(dateString);
+    if (!d) return '-';
+    return d.toLocaleDateString('en-IN', {
+        year: 'numeric', month: 'short', day: 'numeric', timeZone: 'Asia/Kolkata',
+    });
 }
 
 function formatDateTime(dateString) {
-    if (!dateString) return '-';
-    return new Date(dateString).toLocaleDateString('en-IN', {
+    const d = _parseAsUtc(dateString);
+    if (!d) return '-';
+    return d.toLocaleString('en-IN', {
         year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
+        hour12: true, timeZone: 'Asia/Kolkata',
     });
 }
 

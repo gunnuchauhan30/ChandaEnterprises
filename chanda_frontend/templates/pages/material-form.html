@@ -89,6 +89,12 @@
                         <option value="inactive">Inactive</option>
                     </select>
                 </div>
+                <div class="form-group">
+                    <label style="display:flex; align-items:center; gap:8px; cursor:pointer;" title="Automatically adds this material to the Critical Spares list using Min Qty as the alert threshold">
+                        <input type="checkbox" id="is_critical_spare">
+                        Mark as Critical Spare
+                    </label>
+                </div>
             </div>
 
             <div style="display: flex; gap: 12px; margin-top: 10px;">
@@ -141,6 +147,19 @@
 
         const result = await API.createMaterial(payload);
         if (result) {
+            // Point 3: if "Mark as Critical Spare" was ticked at creation time,
+            // link it into the Critical Spares list right away.
+            if (document.getElementById('is_critical_spare').checked) {
+                try {
+                    await API.createCriticalSpare({
+                        material_code: payload.material_code,
+                        machine_name: null,
+                        priority: 'critical',
+                        threshold_qty: payload.min_qty || 0,
+                        remarks: 'Marked critical at material creation',
+                    });
+                } catch (e) { /* material still saved fine even if this fails */ }
+            }
             showAlert('Material created successfully', 'success');
             setTimeout(() => window.location.href = '/materials', 800);
         }

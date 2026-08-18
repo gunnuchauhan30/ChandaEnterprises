@@ -23,12 +23,12 @@
             <table>
                 <thead>
                     <tr>
-                        <th>Request No</th><th>Material</th><th>Qty</th><th>Fulfilled</th><th>Pending</th><th>Department</th>
+                        <th>Request No</th><th>Date</th><th>Material</th><th>Qty</th><th>Fulfilled</th><th>Pending</th><th>Department</th>
                         <th>Job Card</th><th>Purpose</th><th>Status</th><th>Actions</th>
                     </tr>
                 </thead>
                 <tbody id="requestsBody">
-                    <tr><td colspan="10" style="text-align: center; padding: 30px; color: #999;">
+                    <tr><td colspan="11" style="text-align: center; padding: 30px; color: #999;">
                         <div class="spinner"></div><div style="margin-top: 10px;">Loading requests...</div>
                     </td></tr>
                 </tbody>
@@ -63,6 +63,7 @@
                 const color = r.status === 'completed' ? 'success' : r.status === 'rejected' ? 'danger' : r.status === 'partial' ? 'info' : 'warning';
                 row.innerHTML = `
                     <td>${r.request_no}</td>
+                    <td>${formatDateTime(r.created_at)}</td>
                     <td>${r.material_name ? `${r.material_code} — ${r.material_name}` : r.material_code}</td>
                     <td>${r.requested_qty}</td>
                     <td>${r.fulfilled_qty ?? 0}</td>
@@ -82,7 +83,7 @@
             document.getElementById('pageInfo').textContent = `Page ${currentPage}`;
             document.getElementById('nextBtn').disabled = response.items.length < pageSize;
         } else {
-            tbody.innerHTML = '<tr><td colspan="10" style="text-align: center; color: #999;">No requests found</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="11" style="text-align: center; color: #999;">No requests found</td></tr>';
         }
     }
 
