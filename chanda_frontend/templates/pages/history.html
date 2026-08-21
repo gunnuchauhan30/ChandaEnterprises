@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+{% block title %}Activity History - Chanda Enterprises{% endblock %}
+{% block page_title %}Activity History{% endblock %}
+
+{% block content %}
+<div class="container-fluid" style="max-width: 1300px; margin: 0 auto;">
+
+    <div style="display:flex; gap:12px; margin-bottom:20px; flex-wrap: wrap;">
+        <button class="btn btn-secondary btn-sm active" id="tabActivityBtn" onclick="switchTab('activity')">Actions</button>
+        <button class="btn btn-secondary btn-sm" id="tabLoginBtn" onclick="switchTab('login')">Logins</button>
+        <input type="date" id="dateFrom" onchange="loadActivity()" style="padding: 8px 12px; background: var(--glass-dark); border: 1px solid var(--glass-medium); border-radius: 8px; color: var(--text-light);">
+        <input type="date" id="dateTo" onchange="loadActivity()" style="padding: 8px 12px; background: var(--glass-dark); border: 1px solid var(--glass-medium); border-radius: 8px; color: var(--text-light);">
+    </div>
+
+    <div class="glass card-3d" style="padding: 24px; border-radius: 12px;">
+        <div id="activityTab" class="table-container">
+            <table>
+                <thead><tr><th>Date/Time</th><th>User</th><th>Action</th><th>Module</th><th>IP Address</th></tr></thead>
+                <tbody id="activityBody"><tr><td colspan="5" style="text-align:center; padding:20px; color:#999;">Loading...</td></tr></tbody>
+            </table>
+        </div>
+        <div id="loginTab" class="table-container" style="display:none;">
+            <table>
+                <thead><tr><th>Date/Time</th><th>Username Attempted</th><th>Result</th><th>IP Address</th></tr></thead>
+                <tbody id="loginBody"><tr><td colspan="4" style="text-align:center; padding:20px; color:#999;">Loading...</td></tr></tbody>
+            </table>
+        </div>
+        <div style="display: flex; justify-content: center; align-items: center; gap: 10px; margin-top: 20px;">
+            <button onclick="changePage(-1)" class="btn btn-secondary btn-sm">← Previous</button>
+            <span id="pageInfo" style="color: var(--text-lighter);">Page 1</span>
+            <button onclick="changePage(1)" class="btn btn-secondary btn-sm">Next →</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    let currentTab = 'activity';
+    let currentPage = 1;
+    const pageSize = 50;
+
+    document.addEventListener('DOMContentLoaded', loadActivity);
+
+    function switchTab(tab) {
+        currentTab = tab;
+        currentPage = 1;
+        document.getElementById('activityTab').style.display = tab === 'activity' ? 'block' : 'none';
+        document.getElementById('loginTab').style.display = tab === 'login' ? 'block' : 'none';
+        document.getElementById('tabActivityBtn').classList.toggle('active', tab === 'activity');
+        document.getElementById('tabLoginBtn').classList.toggle('active', tab === 'login');
+        tab === 'activity' ? loadActivity() : loadLogins();
+    }
+
+    async function loadActivity() {
+        const filters = {};
+        const from = document.getElementById('dateFrom').value;
+        const to = document.getElementById('dateTo').value;
+        if (from) filters.date_from = from;
+        if (to) filters.date_to = to;
+        const data = await API.getActivityHistory(currentPage, pageSize, filters);
+        const tbody = document.getElementById('activityBody');
+        tbody.innerHTML = '';
+        const items = (data && data.items) || [];
+        if (!items.length) {
+            tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:#999;">No activity recorded for this range</td></tr>';
+            return;
+        }
+        items.forEach(r => {
+            const tr = tbody.insertRow();
+            tr.innerHTML = `
+                <td>${formatDateTime(r.created_at)}</td>
+                <td>${r.user}</td>
+                <td>${r.action}</td>
+                <td>${r.module || '-'}</td>
+                <td>${r.ip_address || '-'}</td>
+            `;
+        });
+        document.getElementById('pageInfo').textContent = `Page ${currentPage}`;
+    }
+
+    async function loadLogins() {
+        const data = await API.getLoginHistory(currentPage, pageSize);
+        const tbody = document.getElementById('loginBody');
+        tbody.innerHTML = '';
+        const items = (data && data.items) || [];
+        if (!items.length) {
+            tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; color:#999;">No login attempts recorded</td></tr>';
+            return;
+        }
+        items.forEach(r => {
+            const tr = tbody.insertRow();
+            tr.innerHTML = `
+                <td>${formatDateTime(r.created_at)}</td>
+                <td>${r.username_attempted}</td>
+                <td><span class="badge badge-${r.success ? 'success' : 'danger'}">${r.success ? 'Success' : 'Failed'}</span></td>
+                <td>${r.ip_address || '-'}</td>
+            `;
+        });
+        document.getElementById('pageInfo').textContent = `Page ${currentPage}`;
+    }
+
+    function changePage(delta) {
+        if (currentPage + delta < 1) return;
+        currentPage += delta;
+        currentTab === 'activity' ? loadActivity() : loadLogins();
+    }
+</script>
+{% endblock %}

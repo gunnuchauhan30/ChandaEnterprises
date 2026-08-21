@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% block title %}Issues - Chanda Enterprises{% endblock %}
+{% block page_title %}Material Issues (Route Card){% endblock %}
+
+{% block content %}
+<div class="container-fluid" style="max-width: 1400px; margin: 0 auto;">
+    <div style="display: flex; justify-content: flex-end; margin-bottom: 20px;">
+        <a href="/issues/new" class="btn btn-primary"><i class="bi bi-plus"></i> New Direct Issue</a>
+    </div>
+
+    <div class="glass card-3d" style="padding: 24px; border-radius: 12px;">
+        <div class="table-container">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Issue No</th><th>Material</th><th>Job Card</th><th>Department</th>
+                        <th>Issued Qty</th><th>Consumed</th><th>Status</th><th>Date</th><th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="issuesBody">
+                    <tr><td colspan="9" style="text-align: center; padding: 30px; color: #999;">
+                        <div class="spinner"></div><div style="margin-top: 10px;">Loading issues...</div>
+                    </td></tr>
+                </tbody>
+            </table>
+        </div>
+        <div style="display: flex; justify-content: center; align-items: center; gap: 10px; margin-top: 20px;">
+            <button onclick="previousPage()" class="btn btn-secondary btn-sm">← Previous</button>
+            <span id="pageInfo" style="color: var(--text-lighter);">Page 1</span>
+            <button onclick="nextPage()" id="nextBtn" class="btn btn-secondary btn-sm">Next →</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    let currentPage = 1;
+    const pageSize = 20;
+
+    document.addEventListener('DOMContentLoaded', () => loadIssues());
+
+    async function loadIssues() {
+        const response = await API.getIssues(currentPage, pageSize);
+        const tbody = document.getElementById('issuesBody');
+        tbody.innerHTML = '';
+        if (!response) return;
+
+        if (response.items && response.items.length > 0) {
+            response.items.forEach(i => {
+                const row = tbody.insertRow();
+                const color = i.completion_status === 'completed' ? 'success' : i.completion_status === 'partial' ? 'warning' : 'info';
+                row.innerHTML = `
+                    <td>${i.issue_no}</td>
+                    <td>${i.material_code}</td>
+                    <td>${i.job_card_no || '-'}</td>
+                    <td>${i.department || '-'}</td>
+                    <td>${i.issue_qty}</td>
+                    <td>${i.consumed_qty ?? '-'}</td>
+                    <td><span class="badge badge-${color}">${i.completion_status}</span></td>
+                    <td>${formatDate(i.issue_date)}</td>
+                    <td>
+                        ${i.completion_status !== 'completed' ? `<button class="btn btn-sm btn-secondary" onclick="updateConsumption(${i.id}, ${i.issue_qty})" title="Update consumption"><i class="bi bi-pencil"></i></button>` : ''}
+                    </td>
+                `;
+            });
+            document.getElementById('pageInfo').textContent = `Page ${currentPage}`;
+            document.getElementById('nextBtn').disabled = response.items.length < pageSize;
+        } else {
+            tbody.innerHTML = '<tr><td colspan="9" style="text-align: center; color: #999;">No issues found</td></tr>';
+        }
+    }
+
+    function nextPage() { currentPage++; loadIssues(); }
+    function previousPage() { if (currentPage > 1) currentPage--; loadIssues(); }
+
+    async function updateConsumption(id, issueQty) {
+        const consumed = prompt(`Consumed quantity (max ${issueQty}):`);
+        if (consumed === null) return;
+        const qty = parseFloat(consumed);
+        if (isNaN(qty) || qty < 0 || qty > issueQty) {
+            showAlert('Invalid quantity', 'danger');
+            return;
+        }
+        const status = qty >= issueQty ? 'completed' : 'partial';
+        const result = await API.updateIssueConsumption(id, qty, status);
+        if (result) {
+            showAlert('Consumption updated', 'success');
+            loadIssues();
+        }
+    }
+</script>
+{% endblock %}

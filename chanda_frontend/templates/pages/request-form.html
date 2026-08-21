@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% block title %}New Request - Chanda Enterprises{% endblock %}
+{% block page_title %}New Material Request{% endblock %}
+
+{% block content %}
+<div class="container-fluid" style="max-width: 700px; margin: 0 auto;">
+    <div class="glass card-3d" style="padding: 30px; border-radius: 12px;">
+        <form id="requestForm">
+            <div class="form-group">
+                <label for="material_code">Material *</label>
+                <select id="material_code" required><option value="">-- Select material --</option></select>
+            </div>
+            <div class="form-group">
+                <label for="requested_qty">Quantity Required *</label>
+                <input type="number" id="requested_qty" step="0.01" min="0.01" required oninput="checkStockWarning()">
+                <div id="stockWarningBox" style="display:none; margin-top:6px; padding:8px 12px; background:rgba(230,57,70,0.12); border:1px solid rgba(230,57,70,0.4); border-radius:6px; font-size:13px; color:#e63946;"></div>
+            </div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+                <div class="form-group">
+                    <label for="department">Department</label>
+                    <input type="text" id="department">
+                </div>
+                <div class="form-group">
+                    <label for="job_card_no">Job Card No</label>
+                    <input type="text" id="job_card_no">
+                </div>
+                <div class="form-group">
+                    <label for="part_number">Part Number</label>
+                    <input type="text" id="part_number">
+                </div>
+            </div>
+            <div class="form-group">
+                <label for="purpose">Purpose</label>
+                <textarea id="purpose"></textarea>
+            </div>
+            <div style="display: flex; gap: 12px;">
+                <button type="submit" class="btn btn-primary"><i class="bi bi-check-lg"></i> Submit Request</button>
+                <a href="/requests" class="btn btn-secondary">Cancel</a>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+    let materialAvailability = {};
+
+    document.addEventListener('DOMContentLoaded', async () => {
+        const materials = await API.getMaterials(1, 500);
+        const sel = document.getElementById('material_code');
+        if (materials && materials.items) {
+            materials.items.forEach(m => {
+                materialAvailability[m.material_code] = m.available_qty;
+                const opt = document.createElement('option');
+                opt.value = m.material_code;
+                opt.textContent = `${m.material_code} - ${m.material_name} (avail: ${m.available_qty})`;
+                sel.appendChild(opt);
+            });
+        }
+    });
+
+    document.getElementById('material_code').addEventListener('change', checkStockWarning);
+
+    // Point 8: as soon as the employee asks for more than what's currently in
+    // store, tell them right away instead of letting them find out after submitting.
+    function checkStockWarning() {
+        const code = document.getElementById('material_code').value;
+        const qty = parseFloat(document.getElementById('requested_qty').value) || 0;
+        const box = document.getElementById('stockWarningBox');
+        const available = materialAvailability[code];
+        if (code && available !== undefined && qty > available) {
+            box.style.display = 'block';
+            box.innerHTML = `<i class="bi bi-exclamation-triangle"></i> Only <b>${available}</b> currently in store. `
+                + `You can still submit ${qty} -- ${available} will be issued now and the remaining `
+                + `${(qty - available).toFixed(2)} will queue as a backorder until new stock arrives.`;
+        } else {
+            box.style.display = 'none';
+        }
+    }
+
+    document.getElementById('requestForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const payload = {
+            material_code: document.getElementById('material_code').value,
+            requested_qty: parseFloat(document.getElementById('requested_qty').value),
+            department: document.getElementById('department').value || null,
+            job_card_no: document.getElementById('job_card_no').value || null,
+            part_number: document.getElementById('part_number').value || null,
+            purpose: document.getElementById('purpose').value || null,
+        };
+        const result = await API.createRequest(payload);
+        if (result) {
+            if (result.stock_warning) {
+                showAlert(result.stock_warning, 'warning');
+                setTimeout(() => window.location.href = '/requests', 2200);
+            } else {
+                showAlert(`Request ${result.request_no} submitted`, 'success');
+                setTimeout(() => window.location.href = '/requests', 800);
+            }
+        }
+    });
+</script>
+{% endblock %}

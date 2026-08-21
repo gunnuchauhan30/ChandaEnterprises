@@ -1,0 +1,282 @@
+{% extends "base.html" %}
+{% block title %}Inventory - Chanda Enterprises{% endblock %}
+{% block page_title %}Inventory Overview{% endblock %}
+
+{% block content %}
+<div class="container-fluid" style="max-width: 1400px; margin: 0 auto;">
+    <div style="display: flex; gap: 10px; margin-bottom: 20px;">
+        <button class="btn btn-secondary btn-sm" onclick="showTab('summary')" id="tabSummaryBtn">Summary</button>
+        <button class="btn btn-secondary btn-sm" onclick="showTab('valuation')" id="tabValuationBtn">Valuation</button>
+        <button class="btn btn-secondary btn-sm" onclick="showTab('aging')" id="tabAgingBtn">Aging</button>
+        <button class="btn btn-secondary btn-sm" onclick="showTab('reconciliation')" id="tabReconciliationBtn">Physical Reconciliation</button>
+    </div>
+
+    <div class="glass card-3d" style="padding: 24px; border-radius: 12px;">
+        <div id="summaryTab" class="table-container">
+            <div style="margin-bottom: 16px;">
+                <input type="text" id="inventorySearchInput" placeholder="Search by code, name or location..."
+                       oninput="filterInventorySummary()"
+                       style="padding: 10px 14px; background: var(--glass-dark); border: 1px solid var(--glass-medium); border-radius: 8px; color: var(--text-light); width: 320px;">
+            </div>
+            <table>
+                <thead><tr><th>Code</th><th>Name</th><th>Opening</th><th>Current</th><th>Reserved</th><th>Available</th><th>Location</th></tr></thead>
+                <tbody id="summaryBody"><tr><td colspan="7" style="text-align:center; padding:20px; color:#999;"><div class="spinner"></div></td></tr></tbody>
+            </table>
+        </div>
+        <div id="valuationTab" class="table-container" style="display:none;">
+            <table>
+                <thead><tr id="valuationHead"></tr></thead>
+                <tbody id="valuationBody"></tbody>
+            </table>
+        </div>
+        <div id="agingTab" class="table-container" style="display:none;">
+            <table>
+                <thead><tr id="agingHead"></tr></thead>
+                <tbody id="agingBody"></tbody>
+            </table>
+        </div>
+        <div id="reconciliationTab" style="display:none;">
+            <div style="display:flex; justify-content: space-between; align-items:center; margin-bottom: 20px; flex-wrap: wrap; gap: 10px;">
+                <div style="display:flex; gap:10px;">
+                    <select id="recoStatusFilter" onchange="loadReconciliations()" style="padding: 10px 14px; background: var(--glass-dark); border: 1px solid var(--glass-medium); border-radius: 8px; color: var(--text-light);">
+                        <option value="pending">Pending</option>
+                        <option value="approved">Approved</option>
+                        <option value="rejected">Rejected</option>
+                        <option value="">All</option>
+                    </select>
+                </div>
+                <button onclick="openReconciliationModal()" class="btn btn-primary"><i class="bi bi-clipboard-check"></i> Enter Physical Count</button>
+            </div>
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Material</th><th>System Qty</th><th>Physical Qty</th><th>Difference</th>
+                            <th>Remarks</th><th>Status</th><th>Counted By</th><th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="reconciliationBody"><tr><td colspan="8" style="text-align:center; padding:20px; color:#999;">Loading...</td></tr></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Physical Count Entry Modal -->
+<div class="modal" id="reconciliationModal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h2>Enter Physical Stock Count</h2>
+            <button class="close-btn" onclick="closeReconciliationModal()">&times;</button>
+        </div>
+        <form id="reconciliationForm" onsubmit="submitReconciliation(event)">
+            <div class="form-group">
+                <label>Material Code</label>
+                <input type="text" id="recoMaterialCode" required placeholder="Start typing to search..." autocomplete="off">
+                <div id="recoMaterialSuggestions" style="background: var(--glass-dark); border-radius: 8px; margin-top: 4px; max-height: 160px; overflow-y: auto;"></div>
+                <div id="recoSystemQtyHint" style="font-size: 12px; color: var(--text-lighter); margin-top: 6px;"></div>
+            </div>
+            <div class="form-group">
+                <label>Physical Count (actual counted quantity)</label>
+                <input type="number" id="recoPhysicalQty" step="0.01" required>
+            </div>
+            <div class="form-group">
+                <label>Remarks</label>
+                <textarea id="recoRemarks" placeholder="e.g. Reason for mismatch, if known"></textarea>
+            </div>
+            <div style="background: rgba(59,130,246,0.1); border-left: 4px solid var(--info); padding: 12px; border-radius: 8px; margin-bottom: 20px; font-size: 13px; color: #93c5fd;">
+                This will NOT change stock immediately. It goes to Admin for approval;
+                only once approved does the system quantity get adjusted (as a tracked ADJUSTMENT entry).
+            </div>
+            <div style="display:flex; gap:10px; justify-content:flex-end;">
+                <button type="button" class="btn btn-secondary" onclick="closeReconciliationModal()">Cancel</button>
+                <button type="submit" class="btn btn-primary">Submit for Approval</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+
+<script>
+    document.addEventListener('DOMContentLoaded', () => loadSummary());
+
+    let inventorySummaryRows = [];
+
+    async function loadSummary() {
+        const data = await API.getInventorySummary();
+        inventorySummaryRows = (data && data.items) ? data.items : [];
+        renderInventorySummary(inventorySummaryRows);
+    }
+
+    function renderInventorySummary(rows) {
+        const tbody = document.getElementById('summaryBody');
+        tbody.innerHTML = '';
+        if (rows.length) {
+            rows.forEach(m => {
+                const tr = tbody.insertRow();
+                tr.innerHTML = `
+                    <td>${m.material_code}</td><td>${m.material_name}</td>
+                    <td>${m.opening_qty}</td><td>${m.current_qty}</td>
+                    <td>${m.reserved_qty}</td><td>${m.available_qty}</td>
+                    <td>${[m.warehouse, m.rack, m.bin].filter(Boolean).join(' / ') || '-'}</td>
+                `;
+            });
+        } else {
+            tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; color:#999;">No materials found</td></tr>';
+        }
+    }
+
+    function filterInventorySummary() {
+        const q = document.getElementById('inventorySearchInput').value.trim().toLowerCase();
+        if (!q) { renderInventorySummary(inventorySummaryRows); return; }
+        const filtered = inventorySummaryRows.filter(m => {
+            const loc = [m.warehouse, m.rack, m.bin].filter(Boolean).join(' / ').toLowerCase();
+            return (m.material_code || '').toLowerCase().includes(q)
+                || (m.material_name || '').toLowerCase().includes(q)
+                || loc.includes(q);
+        });
+        renderInventorySummary(filtered);
+    }
+
+    // Valuation/aging come from DB views with dynamic columns, so render generically.
+    async function loadGeneric(getter, headEl, bodyEl) {
+        const data = await getter();
+        const rows = (data && data.items) ? data.items : [];
+        const head = document.getElementById(headEl);
+        const body = document.getElementById(bodyEl);
+        head.innerHTML = ''; body.innerHTML = '';
+        if (!rows.length) {
+            body.innerHTML = '<tr><td style="text-align:center; color:#999; padding:20px;">No data</td></tr>';
+            return;
+        }
+        const cols = Object.keys(rows[0]);
+        head.innerHTML = cols.map(c => `<th>${c}</th>`).join('');
+        rows.forEach(row => {
+            const tr = document.createElement('tr');
+            tr.innerHTML = cols.map(c => `<td>${row[c] ?? '-'}</td>`).join('');
+            body.appendChild(tr);
+        });
+    }
+
+    let valuationLoaded = false, agingLoaded = false;
+
+    function showTab(tab) {
+        document.getElementById('summaryTab').style.display = tab === 'summary' ? 'block' : 'none';
+        document.getElementById('valuationTab').style.display = tab === 'valuation' ? 'block' : 'none';
+        document.getElementById('agingTab').style.display = tab === 'aging' ? 'block' : 'none';
+        document.getElementById('reconciliationTab').style.display = tab === 'reconciliation' ? 'block' : 'none';
+        if (tab === 'valuation' && !valuationLoaded) {
+            loadGeneric(API.getStockValuation.bind(API), 'valuationHead', 'valuationBody');
+            valuationLoaded = true;
+        }
+        if (tab === 'aging' && !agingLoaded) {
+            loadGeneric(API.getStockAging.bind(API), 'agingHead', 'agingBody');
+            agingLoaded = true;
+        }
+        if (tab === 'reconciliation') {
+            loadReconciliations();
+        }
+    }
+
+    // ============= PHYSICAL STOCK RECONCILIATION =============
+
+    function currentUserRole() {
+        const user = JSON.parse(localStorage.getItem('user') || '{}');
+        return user.role || '';
+    }
+
+    async function loadReconciliations() {
+        const status = document.getElementById('recoStatusFilter').value;
+        const data = await API.getReconciliations(status);
+        const tbody = document.getElementById('reconciliationBody');
+        tbody.innerHTML = '';
+        const rows = (data && data.items) ? data.items : [];
+        const isAdmin = currentUserRole() === 'admin';
+
+        if (!rows.length) {
+            tbody.innerHTML = '<tr><td colspan="8" style="text-align:center; color:#999; padding:20px;">No reconciliation records</td></tr>';
+            return;
+        }
+
+        rows.forEach(r => {
+            const tr = tbody.insertRow();
+            const diffColor = r.difference_qty == 0 ? 'var(--text-lighter)' : (r.difference_qty > 0 ? '#f59e0b' : '#ef4444');
+            const statusBadge = { pending: 'badge-warning', approved: 'badge-success', rejected: 'badge-danger' }[r.status];
+            let actions = '-';
+            if (r.status === 'pending' && isAdmin) {
+                actions = `
+                    <button class="btn btn-sm btn-success" onclick="decideReco(${r.id}, 'approve')" title="Approve"><i class="bi bi-check-lg"></i></button>
+                    <button class="btn btn-sm btn-danger" onclick="decideReco(${r.id}, 'reject')" title="Reject"><i class="bi bi-x-lg"></i></button>
+                `;
+            } else if (r.status === 'pending') {
+                actions = '<span style="color:#999; font-size:12px;">Awaiting admin</span>';
+            }
+            tr.innerHTML = `
+                <td>${r.material_code}${r.material_name ? ' — ' + r.material_name : ''}</td>
+                <td>${r.system_qty}</td>
+                <td>${r.physical_qty}</td>
+                <td style="color:${diffColor}; font-weight:600;">${r.difference_qty > 0 ? '+' : ''}${r.difference_qty}</td>
+                <td>${r.remarks || '-'}</td>
+                <td><span class="badge ${statusBadge}">${r.status}</span></td>
+                <td>${r.counted_by || '-'}</td>
+                <td>${actions}</td>
+            `;
+        });
+    }
+
+    async function decideReco(id, action) {
+        const remarks = action === 'reject' ? (prompt('Reason for rejection (optional):') || '') : '';
+        const result = await API.decideReconciliation(id, action, remarks);
+        if (result) {
+            showAlert(`Reconciliation ${action}d`, 'success');
+            loadReconciliations();
+        }
+    }
+
+    function openReconciliationModal() {
+        document.getElementById('reconciliationForm').reset();
+        document.getElementById('recoMaterialSuggestions').innerHTML = '';
+        document.getElementById('recoSystemQtyHint').textContent = '';
+        document.getElementById('reconciliationModal').classList.add('active');
+    }
+
+    function closeReconciliationModal() {
+        document.getElementById('reconciliationModal').classList.remove('active');
+    }
+
+    document.getElementById('recoMaterialCode').addEventListener('input', async (e) => {
+        const q = e.target.value;
+        const box = document.getElementById('recoMaterialSuggestions');
+        if (!q) { box.innerHTML = ''; return; }
+        const res = await API.getMaterials(1, 8, q);
+        const items = (res && res.items) ? res.items : [];
+        box.innerHTML = items.map(m => `
+            <div class="glass-sm" style="padding:8px 12px; cursor:pointer; margin-bottom:4px;"
+                 onclick="selectRecoMaterial('${m.material_code}', ${m.current_qty})">
+                <strong>${m.material_code}</strong> — ${m.material_name} (current: ${m.current_qty})
+            </div>
+        `).join('') || '<div style="padding:8px 12px; color:#999;">No matches</div>';
+    });
+
+    function selectRecoMaterial(code, currentQty) {
+        document.getElementById('recoMaterialCode').value = code;
+        document.getElementById('recoSystemQtyHint').textContent = `Current system stock: ${currentQty}`;
+        document.getElementById('recoMaterialSuggestions').innerHTML = '';
+    }
+
+    async function submitReconciliation(e) {
+        e.preventDefault();
+        const payload = {
+            material_code: document.getElementById('recoMaterialCode').value,
+            physical_qty: parseFloat(document.getElementById('recoPhysicalQty').value),
+            remarks: document.getElementById('recoRemarks').value || null,
+        };
+        const result = await API.createReconciliation(payload);
+        if (result) {
+            showAlert('Physical count submitted for admin approval', 'success');
+            closeReconciliationModal();
+            loadReconciliations();
+        }
+    }
+</script>
+{% endblock %}
