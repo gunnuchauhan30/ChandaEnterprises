@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+{% block title %}Purchases / GRN - Chanda Enterprises{% endblock %}
+{% block page_title %}Purchase / GRN{% endblock %}
+
+{% block content %}
+<div class="container-fluid" style="max-width: 1400px; margin: 0 auto;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+        <div style="display: flex; gap: 10px;">
+            <select id="qcFilter" onchange="applyFilter()" style="padding: 10px 14px; background: var(--glass-dark); border: 1px solid var(--glass-medium); border-radius: 8px; color: var(--text-light);">
+                <option value="">All QC Status</option>
+                <option value="pending">Pending</option>
+                <option value="passed">Passed</option>
+                <option value="failed">Failed</option>
+            </select>
+        </div>
+        <a href="/purchases/new" class="btn btn-primary"><i class="bi bi-plus"></i> New GRN</a>
+    </div>
+
+    <div class="glass card-3d" style="padding: 24px; border-radius: 12px;">
+        <div class="table-container">
+            <table>
+                <thead>
+                    <tr>
+                        <th>GRN No</th><th>Material</th><th>Supplier</th><th>Qty</th>
+                        <th>Unit Cost</th><th>Invoice No</th><th>QC Status</th><th>Date</th><th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="purchasesBody">
+                    <tr><td colspan="9" style="text-align: center; padding: 30px; color: #999;">
+                        <div class="spinner"></div><div style="margin-top: 10px;">Loading purchases...</div>
+                    </td></tr>
+                </tbody>
+            </table>
+        </div>
+        <div style="display: flex; justify-content: center; align-items: center; gap: 10px; margin-top: 20px;">
+            <button onclick="previousPage()" class="btn btn-secondary btn-sm">← Previous</button>
+            <span id="pageInfo" style="color: var(--text-lighter);">Page 1</span>
+            <button onclick="nextPage()" id="nextBtn" class="btn btn-secondary btn-sm">Next →</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    let currentPage = 1;
+    const pageSize = 20;
+
+    document.addEventListener('DOMContentLoaded', () => loadPurchases());
+
+    async function loadPurchases() {
+        const qc = document.getElementById('qcFilter').value;
+        const filters = {};
+        if (qc) filters.qc_status = qc;
+        const response = await API.getPurchases(currentPage, pageSize, filters);
+        const tbody = document.getElementById('purchasesBody');
+        tbody.innerHTML = '';
+        if (!response) return;
+
+        if (response.items && response.items.length > 0) {
+            response.items.forEach(p => {
+                const row = tbody.insertRow();
+                const qcColor = p.qc_status === 'passed' ? 'success' : p.qc_status === 'failed' ? 'danger' : 'warning';
+                const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
+                const canDoQC = currentUser.role === 'quality' || currentUser.role === 'admin';
+                row.innerHTML = `
+                    <td>${p.grn_no}</td>
+                    <td>${p.material_code}</td>
+                    <td>${p.supplier_id ?? '-'}</td>
+                    <td>${p.qty}</td>
+                    <td>${formatCurrency(p.unit_cost)}</td>
+                    <td>${p.invoice_no || '-'}</td>
+                    <td><span class="badge badge-${qcColor}">${p.qc_status}</span></td>
+                    <td>${formatDate(p.created_at)}</td>
+                    <td>
+                        ${(p.qc_status === 'pending' && canDoQC) ? `
+                            <button class="btn btn-sm btn-success" onclick="setQC(${p.id}, 'passed')" title="Pass QC"><i class="bi bi-check-lg"></i></button>
+                            <button class="btn btn-sm btn-danger" onclick="setQC(${p.id}, 'failed')" title="Fail QC"><i class="bi bi-x-lg"></i></button>
+                        ` : (p.qc_status === 'pending' ? '<span style="color:#999; font-size:12px;">Awaiting Quality</span>' : '')}
+                    </td>
+                `;
+            });
+            document.getElementById('pageInfo').textContent = `Page ${currentPage}`;
+            document.getElementById('nextBtn').disabled = response.items.length < pageSize;
+        } else {
+            tbody.innerHTML = '<tr><td colspan="9" style="text-align: center; color: #999;">No purchases found</td></tr>';
+        }
+    }
+
+    function applyFilter() { currentPage = 1; loadPurchases(); }
+    function nextPage() { currentPage++; loadPurchases(); }
+    function previousPage() { if (currentPage > 1) currentPage--; loadPurchases(); }
+
+    async function setQC(purchaseId, status) {
+        let remarks = '';
+        if (status === 'failed') {
+            remarks = prompt('Reason for QC failure (optional):') || '';
+        }
+        const result = await API.updateQCStatus(purchaseId, status, remarks);
+        if (result) {
+            showAlert(`QC marked as ${status}. Stock updates automatically when passed.`, 'success');
+            loadPurchases();
+        }
+    }
+</script>
+{% endblock %}

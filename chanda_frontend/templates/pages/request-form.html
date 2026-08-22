@@ -1,0 +1,192 @@
+{% extends "base.html" %}
+{% block title %}New Request - Chanda Enterprises{% endblock %}
+{% block page_title %}New Material Request{% endblock %}
+
+{% block content %}
+<div class="container-fluid" style="max-width: 800px; margin: 0 auto;">
+    <div class="glass card-3d" style="padding: 30px; border-radius: 12px;">
+        <form id="requestForm">
+            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; margin-bottom: 10px;">
+                <div class="form-group">
+                    <label for="department">Department</label>
+                    <input type="text" id="department">
+                </div>
+                <div class="form-group">
+                    <label for="job_card_no">Job Card No</label>
+                    <input type="text" id="job_card_no">
+                </div>
+                <div class="form-group">
+                    <label for="part_number">Part Number</label>
+                    <input type="text" id="part_number">
+                </div>
+            </div>
+            <div class="form-group">
+                <label for="purpose">Purpose</label>
+                <textarea id="purpose"></textarea>
+            </div>
+
+            <hr style="border-color: var(--glass-medium); margin: 20px 0;">
+            <label style="font-weight:600; display:block; margin-bottom: 10px;">Items *</label>
+            <div id="itemsContainer"></div>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="addItemRow()" style="margin-top: 8px;">
+                <i class="bi bi-plus-lg"></i> Add Another Item
+            </button>
+
+            <div style="display: flex; gap: 12px; margin-top: 24px;">
+                <button type="submit" class="btn btn-primary"><i class="bi bi-check-lg"></i> Submit Request</button>
+                <a href="/requests" class="btn btn-secondary">Cancel</a>
+            </div>
+        </form>
+    </div>
+</div>
+
+<style>
+    .item-row { display: grid; grid-template-columns: 1fr 140px 36px; gap: 12px; align-items: start; margin-bottom: 12px; position: relative; }
+    .item-row .material-search-wrap { position: relative; }
+    .item-row .suggestions { position: absolute; top: 100%; left: 0; right: 0; z-index: 20; background: var(--glass-dark); border: 1px solid var(--glass-medium); border-radius: 8px; margin-top: 4px; max-height: 200px; overflow-y: auto; }
+    .item-row .suggestions div { padding: 8px 12px; cursor: pointer; }
+    .item-row .suggestions div:hover { background: var(--glass-medium); }
+    .item-row .stock-warning { grid-column: 1 / -1; margin-top: -4px; padding: 6px 10px; background: rgba(230,57,70,0.12); border: 1px solid rgba(230,57,70,0.4); border-radius: 6px; font-size: 12px; color: #e63946; display: none; }
+    .item-row .remove-btn { background: rgba(230,57,70,0.15); border: 1px solid rgba(230,57,70,0.4); color: #e63946; border-radius: 8px; height: 42px; cursor: pointer; }
+</style>
+
+<script>
+    let rowCount = 0;
+    // Cache of last-searched availability per row, keyed by row id, so we
+    // know the current stock without a second round trip when the user picks one.
+    const rowMaterialData = {};
+
+    function addItemRow() {
+        rowCount++;
+        const id = rowCount;
+        const container = document.getElementById('itemsContainer');
+        const row = document.createElement('div');
+        row.className = 'item-row';
+        row.id = `row-${id}`;
+        row.innerHTML = `
+            <div class="material-search-wrap">
+                <input type="text" id="matSearch-${id}" placeholder="Type material code or name..." autocomplete="off" required
+                       style="padding: 10px 14px; background: var(--glass-dark); border: 1px solid var(--glass-medium); border-radius: 8px; color: var(--text-light); width: 100%;">
+                <input type="hidden" id="matCode-${id}">
+                <div class="suggestions" id="suggestions-${id}"></div>
+            </div>
+            <input type="number" id="qty-${id}" placeholder="Qty" step="0.01" min="0.01" required
+                   style="padding: 10px 14px; background: var(--glass-dark); border: 1px solid var(--glass-medium); border-radius: 8px; color: var(--text-light); width: 100%;">
+            <button type="button" class="remove-btn" onclick="removeItemRow(${id})" title="Remove"><i class="bi bi-trash"></i></button>
+            <div class="stock-warning" id="warning-${id}"></div>
+        `;
+        container.appendChild(row);
+
+        const searchInput = document.getElementById(`matSearch-${id}`);
+        const suggestBox = document.getElementById(`suggestions-${id}`);
+        const qtyInput = document.getElementById(`qty-${id}`);
+
+        let debounceTimer;
+        searchInput.addEventListener('input', () => {
+            document.getElementById(`matCode-${id}`).value = '';
+            clearTimeout(debounceTimer);
+            const q = searchInput.value.trim();
+            if (!q) { suggestBox.innerHTML = ''; return; }
+            debounceTimer = setTimeout(async () => {
+                const res = await API.getMaterials(1, 10, q);
+                const items = (res && res.items) ? res.items : [];
+                suggestBox.innerHTML = items.map(m => `
+                    <div onclick='pickMaterial(${id}, ${JSON.stringify(m.material_code)}, ${JSON.stringify(m.material_name)}, ${m.available_qty}, ${JSON.stringify(m.grade || "")})'>
+                        <strong>${m.material_code}</strong> — ${m.material_name}${m.grade ? ' (' + m.grade + ')' : ''}
+                        <span style="color:#999;"> · avail: ${m.available_qty}</span>
+                    </div>
+                `).join('') || '<div style="color:#999;">No matches</div>';
+            }, 200);
+        });
+
+        qtyInput.addEventListener('input', () => checkRowStock(id));
+
+        document.addEventListener('click', (e) => {
+            if (!row.contains(e.target)) suggestBox.innerHTML = '';
+        });
+    }
+
+    function removeItemRow(id) {
+        const row = document.getElementById(`row-${id}`);
+        if (row) row.remove();
+        delete rowMaterialData[id];
+    }
+
+    function pickMaterial(id, code, name, availableQty, grade) {
+        document.getElementById(`matSearch-${id}`).value = `${code} - ${name}${grade ? ' (' + grade + ')' : ''}`;
+        document.getElementById(`matCode-${id}`).value = code;
+        document.getElementById(`suggestions-${id}`).innerHTML = '';
+        rowMaterialData[id] = availableQty;
+        checkRowStock(id);
+    }
+
+    function checkRowStock(id) {
+        const qty = parseFloat(document.getElementById(`qty-${id}`).value) || 0;
+        const available = rowMaterialData[id];
+        const box = document.getElementById(`warning-${id}`);
+        if (available !== undefined && qty > available) {
+            box.style.display = 'block';
+            box.innerHTML = `<i class="bi bi-exclamation-triangle"></i> Only <b>${available}</b> in store right now -- rest will queue as a backorder.`;
+        } else {
+            box.style.display = 'none';
+        }
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+        addItemRow(); // start with one item row
+    });
+
+    document.getElementById('requestForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const rows = document.querySelectorAll('.item-row');
+        const items = [];
+        for (const row of rows) {
+            const id = row.id.replace('row-', '');
+            const code = document.getElementById(`matCode-${id}`).value;
+            const qty = parseFloat(document.getElementById(`qty-${id}`).value);
+            if (!code) {
+                showAlert('Please pick a material from the suggestions list for every item row.', 'danger');
+                return;
+            }
+            if (!qty || qty <= 0) {
+                showAlert('Please enter a valid quantity for every item.', 'danger');
+                return;
+            }
+            items.push({ material_code: code, requested_qty: qty });
+        }
+        if (items.length === 0) {
+            showAlert('Add at least one item.', 'danger');
+            return;
+        }
+
+        const common = {
+            department: document.getElementById('department').value || null,
+            job_card_no: document.getElementById('job_card_no').value || null,
+            part_number: document.getElementById('part_number').value || null,
+            purpose: document.getElementById('purpose').value || null,
+        };
+
+        // Backend creates one request row per material, so we submit each
+        // item as its own request (same as before), just gathered here in
+        // one form so the user doesn't have to reload the page per item.
+        let successCount = 0;
+        let warnings = [];
+        for (const item of items) {
+            const result = await API.createRequest({ ...common, ...item });
+            if (result) {
+                successCount++;
+                if (result.stock_warning) warnings.push(`${item.material_code}: ${result.stock_warning}`);
+            }
+        }
+
+        if (successCount > 0) {
+            if (warnings.length > 0) {
+                showAlert(`${successCount} request(s) submitted. ${warnings.length} item(s) have a stock warning.`, 'warning');
+            } else {
+                showAlert(`${successCount} request(s) submitted successfully.`, 'success');
+            }
+            setTimeout(() => window.location.href = '/requests', 1200);
+        }
+    });
+</script>
+{% endblock %}

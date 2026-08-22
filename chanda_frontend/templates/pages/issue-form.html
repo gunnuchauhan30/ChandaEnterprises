@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+{% block title %}New Issue - Chanda Enterprises{% endblock %}
+{% block page_title %}New Direct Issue{% endblock %}
+
+{% block content %}
+<div class="container-fluid" style="max-width: 700px; margin: 0 auto;">
+    <div class="glass card-3d" style="padding: 30px; border-radius: 12px;">
+        <form id="issueForm">
+            <div class="form-group" style="position: relative;">
+                <label for="material_search">Material *</label>
+                <input type="text" id="material_search" placeholder="Type material code, name or grade..." autocomplete="off" required
+                       style="padding: 10px 14px; background: var(--glass-dark); border: 1px solid var(--glass-medium); border-radius: 8px; color: var(--text-light); width: 100%;">
+                <input type="hidden" id="material_code">
+                <div id="material_suggestions" style="position:absolute; top:100%; left:0; right:0; z-index:20; background: var(--glass-dark); border: 1px solid var(--glass-medium); border-radius: 8px; margin-top: 4px; max-height: 220px; overflow-y: auto;"></div>
+            </div>
+            <div class="form-group">
+                <label for="issue_qty">Issue Quantity *</label>
+                <input type="number" id="issue_qty" step="0.01" min="0.01" required>
+            </div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+                <div class="form-group"><label for="job_card_no">Job Card No</label><input type="text" id="job_card_no"></div>
+                <div class="form-group"><label for="production_order_no">Production Order No</label><input type="text" id="production_order_no"></div>
+                <div class="form-group"><label for="part_number">Part Number</label><input type="text" id="part_number"></div>
+                <div class="form-group"><label for="machine">Machine</label><input type="text" id="machine"></div>
+                <div class="form-group"><label for="operation">Operation</label><input type="text" id="operation"></div>
+                <div class="form-group"><label for="department">Department</label><input type="text" id="department"></div>
+                <div class="form-group"><label for="shift">Shift</label><input type="text" id="shift"></div>
+                <div class="form-group"><label for="required_qty">Required Qty</label><input type="number" id="required_qty" step="0.01"></div>
+            </div>
+            <div class="form-group"><label for="remark">Remark</label><textarea id="remark"></textarea></div>
+            <div style="display: flex; gap: 12px;">
+                <button type="submit" class="btn btn-primary"><i class="bi bi-check-lg"></i> Issue Material</button>
+                <a href="/issues" class="btn btn-secondary">Cancel</a>
+            </div>
+        </form>
+    </div>
+</div>
+
+<style>
+    #material_suggestions div { padding: 8px 12px; cursor: pointer; }
+    #material_suggestions div:hover { background: var(--glass-medium); }
+</style>
+
+<script>
+    let debounceTimer;
+    const searchInput = document.getElementById('material_search');
+    const suggestBox = document.getElementById('material_suggestions');
+
+    searchInput.addEventListener('input', () => {
+        document.getElementById('material_code').value = '';
+        clearTimeout(debounceTimer);
+        const q = searchInput.value.trim();
+        if (!q) { suggestBox.innerHTML = ''; return; }
+        debounceTimer = setTimeout(async () => {
+            const res = await API.getMaterials(1, 10, q);
+            const items = (res && res.items) ? res.items : [];
+            suggestBox.innerHTML = items.map(m => `
+                <div onclick='pickMaterial(${JSON.stringify(m.material_code)}, ${JSON.stringify(m.material_name)}, ${JSON.stringify(m.grade || "")}, ${m.available_qty})'>
+                    <strong>${m.material_code}</strong> — ${m.material_name}${m.grade ? ' (' + m.grade + ')' : ''}
+                    <span style="color:#999;"> · avail: ${m.available_qty}</span>
+                </div>
+            `).join('') || '<div style="color:#999;">No matches</div>';
+        }, 200);
+    });
+
+    document.addEventListener('click', (e) => {
+        if (!e.target.closest('.form-group')) suggestBox.innerHTML = '';
+    });
+
+    function pickMaterial(code, name, grade, availableQty) {
+        searchInput.value = `${code} - ${name}${grade ? ' (' + grade + ')' : ''} (avail: ${availableQty})`;
+        document.getElementById('material_code').value = code;
+        suggestBox.innerHTML = '';
+    }
+
+    document.getElementById('issueForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const materialCode = document.getElementById('material_code').value;
+        if (!materialCode) {
+            showAlert('Please pick a material from the suggestions list.', 'danger');
+            return;
+        }
+        const payload = {
+            material_code: materialCode,
+            issue_qty: parseFloat(document.getElementById('issue_qty').value),
+            job_card_no: document.getElementById('job_card_no').value || null,
+            production_order_no: document.getElementById('production_order_no').value || null,
+            part_number: document.getElementById('part_number').value || null,
+            machine: document.getElementById('machine').value || null,
+            operation: document.getElementById('operation').value || null,
+            department: document.getElementById('department').value || null,
+            shift: document.getElementById('shift').value || null,
+            required_qty: document.getElementById('required_qty').value ? parseFloat(document.getElementById('required_qty').value) : null,
+            remark: document.getElementById('remark').value || null,
+        };
+        const result = await API.createIssue(payload);
+        if (result) {
+            showAlert(`Issue ${result.issue_no} created`, 'success');
+            setTimeout(() => window.location.href = '/issues', 800);
+        }
+    });
+</script>
+{% endblock %}

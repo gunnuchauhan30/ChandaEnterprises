@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+{% block title %}Requests - Chanda Enterprises{% endblock %}
+{% block page_title %}Material Requests{% endblock %}
+
+{% block content %}
+<div class="container-fluid" style="max-width: 1400px; margin: 0 auto;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+        <select id="statusFilter" onchange="applyFilter()" style="padding: 10px 14px; background: var(--glass-dark); border: 1px solid var(--glass-medium); border-radius: 8px; color: var(--text-light);">
+            <option value="pending">Pending</option>
+            <option value="partial">Partial / Backorder</option>
+            <option value="approved">Approved</option>
+            <option value="rejected">Rejected</option>
+            <option value="">All</option>
+        </select>
+        <div style="display:flex; gap:10px;">
+            <a href="/requests/backorders" class="btn btn-secondary"><i class="bi bi-hourglass-split"></i> Backorders (FIFO)</a>
+            <a href="/requests/new" class="btn btn-primary"><i class="bi bi-plus"></i> New Request</a>
+        </div>
+    </div>
+
+    <div class="glass card-3d" style="padding: 24px; border-radius: 12px;">
+        <div class="table-container">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Request No</th><th>Material</th><th>Qty</th><th>Fulfilled</th><th>Pending</th><th>Department</th>
+                        <th>Job Card</th><th>Purpose</th><th>Status</th><th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="requestsBody">
+                    <tr><td colspan="10" style="text-align: center; padding: 30px; color: #999;">
+                        <div class="spinner"></div><div style="margin-top: 10px;">Loading requests...</div>
+                    </td></tr>
+                </tbody>
+            </table>
+        </div>
+        <div style="display: flex; justify-content: center; align-items: center; gap: 10px; margin-top: 20px;">
+            <button onclick="previousPage()" class="btn btn-secondary btn-sm">← Previous</button>
+            <span id="pageInfo" style="color: var(--text-lighter);">Page 1</span>
+            <button onclick="nextPage()" id="nextBtn" class="btn btn-secondary btn-sm">Next →</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    let currentPage = 1;
+    const pageSize = 20;
+
+    document.addEventListener('DOMContentLoaded', () => loadRequests());
+
+    async function loadRequests() {
+        const status = document.getElementById('statusFilter').value;
+        const filters = {};
+        if (status) filters.status = status;
+        const response = await API.getRequests(currentPage, pageSize, filters);
+        const tbody = document.getElementById('requestsBody');
+        tbody.innerHTML = '';
+        if (!response) return;
+
+        if (response.items && response.items.length > 0) {
+            response.items.forEach(r => {
+                const row = tbody.insertRow();
+                const color = r.status === 'completed' ? 'success' : r.status === 'rejected' ? 'danger' : r.status === 'partial' ? 'info' : 'warning';
+                row.innerHTML = `
+                    <td>${r.request_no}</td>
+                    <td>${r.material_code}</td>
+                    <td>${r.requested_qty}</td>
+                    <td>${r.fulfilled_qty ?? 0}</td>
+                    <td>${r.pending_qty ?? (r.requested_qty - (r.fulfilled_qty || 0))}</td>
+                    <td>${r.department || '-'}</td>
+                    <td>${r.job_card_no || '-'}</td>
+                    <td>${r.purpose || '-'}</td>
+                    <td><span class="badge badge-${color}">${r.status}</span></td>
+                    <td>
+                        ${(r.status === 'pending' || r.status === 'partial') ? `
+                            <button class="btn btn-sm btn-success" onclick="decide(${r.id}, 'approve')" title="Approve / Issue available"><i class="bi bi-check-lg"></i></button>
+                            ${r.status === 'pending' ? `<button class="btn btn-sm btn-danger" onclick="decide(${r.id}, 'reject')" title="Reject"><i class="bi bi-x-lg"></i></button>` : ''}
+                        ` : ''}
+                    </td>
+                `;
+            });
+            document.getElementById('pageInfo').textContent = `Page ${currentPage}`;
+            document.getElementById('nextBtn').disabled = response.items.length < pageSize;
+        } else {
+            tbody.innerHTML = '<tr><td colspan="10" style="text-align: center; color: #999;">No requests found</td></tr>';
+        }
+    }
+
+    function applyFilter() { currentPage = 1; loadRequests(); }
+    function nextPage() { currentPage++; loadRequests(); }
+    function previousPage() { if (currentPage > 1) currentPage--; loadRequests(); }
+
+    async function decide(id, action) {
+        let result;
+        if (action === 'approve') {
+            if (!confirm('Approve this request? Whatever is available in store will be issued now; any shortfall queues as a FIFO backorder.')) return;
+            result = await API.approveRequest(id);
+        } else {
+            const reason = prompt('Rejection reason (optional):') || '';
+            result = await API.rejectRequest(id, reason);
+        }
+        if (result) {
+            showAlert(`Request ${action}d`, 'success');
+            loadRequests();
+        }
+    }
+</script>
+{% endblock %}

@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}New Supplier - Chanda Enterprises{% endblock %}
+{% block page_title %}New Supplier{% endblock %}
+
+{% block content %}
+<div class="container-fluid" style="max-width: 700px; margin: 0 auto;">
+    <div class="glass card-3d" style="padding: 30px; border-radius: 12px;">
+        <form id="supplierForm">
+            <div class="form-group">
+                <label for="supplier_name">Supplier Name *</label>
+                <input type="text" id="supplier_name" required maxlength="150">
+            </div>
+            <div class="form-group">
+                <label for="gst_no">GST No</label>
+                <input type="text" id="gst_no">
+            </div>
+            <div class="form-group">
+                <label for="address">Address</label>
+                <textarea id="address"></textarea>
+            </div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+                <div class="form-group">
+                    <label for="email">Email</label>
+                    <input type="email" id="email">
+                </div>
+                <div class="form-group">
+                    <label for="phone">Phone</label>
+                    <input type="text" id="phone">
+                </div>
+                <div class="form-group">
+                    <label for="payment_terms">Payment Terms</label>
+                    <input type="text" id="payment_terms" placeholder="e.g. Net 30">
+                </div>
+            </div>
+            <div style="display: flex; gap: 12px; margin-top: 10px;">
+                <button type="submit" class="btn btn-primary"><i class="bi bi-check-lg"></i> Save Supplier</button>
+                <a href="/suppliers" class="btn btn-secondary">Cancel</a>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+    document.getElementById('supplierForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const payload = {
+            supplier_name: document.getElementById('supplier_name').value,
+            gst_no: document.getElementById('gst_no').value || null,
+            address: document.getElementById('address').value || null,
+            email: document.getElementById('email').value || null,
+            phone: document.getElementById('phone').value || null,
+            payment_terms: document.getElementById('payment_terms').value || null,
+            is_active: true,
+        };
+        const result = await API.createSupplier(payload);
+        if (result) {
+            showAlert('Supplier created successfully', 'success');
+            setTimeout(() => window.location.href = '/suppliers', 800);
+        }
+    });
+</script>
+{% endblock %}

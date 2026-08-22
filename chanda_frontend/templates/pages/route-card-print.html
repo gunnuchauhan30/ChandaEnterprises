@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Route Card - {{ job_card_no }}</title>
+<style>
+    body { background: #fff; color: #000; font-family: Arial, sans-serif; margin: 0; padding: 24px; }
+    .rc-page { max-width: 850px; margin: 0 auto 40px; }
+    table { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
+    td, th { border: 1px solid #000; padding: 5px 8px; font-size: 12px; vertical-align: top; }
+    .rc-title { text-align: center; font-size: 22px; font-weight: bold; padding: 8px; }
+    .rc-logo { text-align: center; font-weight: bold; font-size: 18px; vertical-align: middle; }
+    .label { font-weight: bold; background: #f2f2f2; }
+    .section-title { font-weight: bold; font-size: 13px; margin: 6px 0 3px; }
+    .toolbar { text-align: right; margin-bottom: 16px; }
+    .toolbar button { padding: 10px 18px; background: #e63946; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; }
+    .blank-row td { height: 20px; }
+    .op-table th { font-size: 11px; }
+    .back-table th { font-size: 10px; padding: 3px 6px; }
+    .back-table td { height: 16px; padding: 2px 6px; }
+    .section-title { font-weight: bold; font-size: 13px; margin: 6px 0 3px; }
+    .footnote { font-size: 10px; color: #555; text-align: right; }
+    #loadingMsg { text-align:center; padding: 60px; color: #666; }
+
+    /* ---- Print rules: this is what keeps it to exactly 2 clean pages, no row ever split ---- */
+    @media print {
+        .toolbar { display: none; }
+        body { padding: 0; }
+        .rc-page { max-width: 100%; margin: 0; }
+        tr { page-break-inside: avoid; }
+        table { page-break-inside: auto; }
+        .page-break { page-break-before: always; }
+        @page { margin: 12mm; }
+    }
+</style>
+</head>
+<body>
+<div class="toolbar">
+    <button onclick="window.print()">🖨 Print / Save as PDF (front &amp; back, 2 pages)</button>
+</div>
+
+<div id="loadingMsg">Loading route card data for job card {{ job_card_no }}...</div>
+<div id="rcRoot" style="display:none;"></div>
+
+<script>
+    window.RAILWAY_BACKEND_URL = "{{ BACKEND_URL }}/api/v1";
+</script>
+<script src="{{ url_for('static', filename='js/api.js') }}"></script>
+<script>
+    const jobCardNo = {{ job_card_no | tojson }};
+
+    // Build N blank <tr> rows for a table with `cols` columns.
+    function blankRows(n, cols) {
+        let out = '';
+        for (let i = 0; i < n; i++) {
+            out += '<tr class="blank-row">' + '<td></td>'.repeat(cols) + '</tr>';
+        }
+        return out;
+    }
+
+    document.addEventListener('DOMContentLoaded', async () => {
+        const issuesResp = await API.getIssues(1, 50, { job_card_no: jobCardNo });
+        const issues = (issuesResp && issuesResp.length) ? issuesResp : (issuesResp && issuesResp.items) || [];
+
+        if (!issues.length) {
+            document.getElementById('loadingMsg').textContent = `No issue records found for job card ${jobCardNo}.`;
+            return;
+        }
+
+        const first = issues[0];
+        const material = await API.getMaterial(first.material_code);
+        const totalIssued = issues.reduce((s, i) => s + parseFloat(i.issue_qty || 0), 0);
+        const totalConsumed = issues.reduce((s, i) => s + parseFloat(i.consumed_qty || 0), 0);
+        const uom = material ? material.uom : '';
+        const issuedByName = first.issued_by_name || '-';
+        const matName = material ? material.material_name : first.material_code;
+
+        // ---------------- PAGE 1: FRONT — header filled, Operation Details left blank ----------------
+        const page1 = `
+            <table>
+                <tr>
+                    <td class="rc-logo" rowspan="6" style="width:12%;">CEPL</td>
+                    <td class="rc-title" colspan="4">Route Card</td>
+                </tr>
+                <tr>
+                    <td class="label" style="width:19%;">JOB CARD NO:</td><td style="width:19%;">${jobCardNo}</td>
+                    <td class="label" style="width:19%;">Assy No.:</td><td style="width:31%;">${first.production_order_no || '-'}</td>
+                </tr>
+                <tr>
+                    <td class="label">Assy Name:</td><td>${matName}</td>
+                    <td class="label">Part No.:</td><td>${first.part_number || '-'}</td>
+                </tr>
+                <tr>
+                    <td class="label">Part Name:</td><td>${matName}</td>
+                    <td class="label">Requisition Qty:</td><td>${first.required_qty ?? totalIssued} ${uom}</td>
+                </tr>
+                <tr>
+                    <td class="label">Issued By:</td><td>${issuedByName}</td>
+                    <td class="label">Qty Issued:</td><td>${totalIssued} ${uom}</td>
+                </tr>
+                <tr>
+                    <td class="label">Material (Type, Size &amp; Grade):</td><td>${matName}</td>
+                    <td class="label">MTC No / Heat No.:</td><td>${first.lot_no || '-'}</td>
+                </tr>
+                <tr>
+                    <td></td>
+                    <td class="label">Job Card Issue Date:</td><td>${formatDate(first.issue_date)}</td>
+                    <td class="label" colspan="2">Consumed Qty: ${totalConsumed} ${uom}</td>
+                </tr>
+            </table>
+
+            <div class="section-title">Operation Details</div>
+            <table class="op-table">
+                <thead>
+                    <tr>
+                        <th>Operation Name</th><th>Production Date</th><th>Qty Planned</th><th>Qty Produced</th>
+                        <th>OK Qty</th><th>Rejected Qty</th><th>R/W Qty</th><th>Hold Qty</th>
+                        <th>Actual Prod. Remarks</th><th>Sup. Sign</th>
+                    </tr>
+                </thead>
+                <tbody>${blankRows(11, 10)}</tbody>
+            </table>
+            <p>SUP. SIGN: ____________________</p>
+            <p class="footnote">CEPL/STR/F/004-00: 10-JAN-2024</p>
+        `;
+
+        // ---------------- PAGE 2: BACK — all 3 sections left blank, matches the paper form ----------------
+        const page2 = `
+            <div class="section-title">Handover to Dispatch</div>
+            <table class="back-table">
+                <thead><tr><th>S No</th><th>Assy. Name / Part Name</th><th>Date</th><th>Qty</th><th>Remarks</th></tr></thead>
+                <tbody>${blankRows(10, 5)}</tbody>
+            </table>
+
+            <div class="section-title">Store Receiving</div>
+            <table class="back-table">
+                <thead><tr><th>S No</th><th>Child Part Name</th><th>Issue Date</th><th>Issue Qty</th><th>Next Operation</th></tr></thead>
+                <tbody>${blankRows(10, 5)}</tbody>
+            </table>
+
+            <div class="section-title">Desp. Details</div>
+            <table class="back-table">
+                <thead><tr><th>S No</th><th>Invoice No</th><th>Invoice Date</th><th>Bill Qty</th><th>Cumm Total</th></tr></thead>
+                <tbody>${blankRows(6, 5)}</tbody>
+            </table>
+
+            <table>
+                <tr>
+                    <td class="label" style="width:34%;">Store Receiving Sign:</td>
+                    <td class="label" style="width:33%;">Purchase Location Add:</td>
+                    <td class="label" style="width:33%;">SUP. SIGN:</td>
+                </tr>
+                <tr class="blank-row"><td></td><td></td><td></td></tr>
+            </table>
+            <p class="footnote">CEPL/STR/F/004-00: 10-JAN-2024 — Auto-generated from live stock/issue records on ${new Date().toLocaleString('en-IN')}</p>
+        `;
+
+        document.getElementById('rcRoot').innerHTML =
+            `<div class="rc-page">${page1}</div><div class="rc-page page-break">${page2}</div>`;
+        document.getElementById('loadingMsg').style.display = 'none';
+        document.getElementById('rcRoot').style.display = 'block';
+    });
+
+    function formatDate(d) {
+        if (!d) return '-';
+        try { return new Date(d).toLocaleDateString('en-IN'); } catch (e) { return d; }
+    }
+</script>
+</body>
+</html>

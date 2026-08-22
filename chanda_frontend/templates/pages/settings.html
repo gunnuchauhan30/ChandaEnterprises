@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Settings - Chanda Enterprises{% endblock %}
+{% block page_title %}Settings{% endblock %}
+
+{% block content %}
+<div class="container-fluid" style="max-width: 700px; margin: 0 auto;">
+    <div class="glass card-3d" style="padding: 30px; border-radius: 12px; margin-bottom: 20px;">
+        <h3 style="color: var(--accent-purple); margin-top:0;">My Profile</h3>
+        <div id="profileBox" style="display:grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 20px;">
+            <div style="text-align:center; grid-column: 1 / -1;"><div class="spinner"></div></div>
+        </div>
+    </div>
+
+    <div class="glass card-3d" style="padding: 30px; border-radius: 12px;">
+        <h3 style="color: var(--accent-purple); margin-top:0;">Password Reset</h3>
+        <p style="color: var(--text-lighter); font-size: 14px;">
+            To change your password, log out and use "Forgot password?" on the login screen.
+        </p>
+        <a href="/forgot-password" class="btn btn-secondary"><i class="bi bi-key"></i> Go to Password Reset</a>
+    </div>
+</div>
+
+<script>
+    document.addEventListener('DOMContentLoaded', async () => {
+        const user = await API.getCurrentUser();
+        const box = document.getElementById('profileBox');
+        if (!user) { box.innerHTML = '<div style="color:#999;">Could not load profile</div>'; return; }
+        box.innerHTML = `
+            <div><div style="font-size:12px; color:var(--text-lighter);">Full Name</div><div>${escapeHtml(user.full_name)}</div></div>
+            <div><div style="font-size:12px; color:var(--text-lighter);">Username</div><div>${escapeHtml(user.username)}</div></div>
+            <div><div style="font-size:12px; color:var(--text-lighter);">Email</div><div>${escapeHtml(user.email)}</div></div>
+            <div><div style="font-size:12px; color:var(--text-lighter);">Role</div><div><span class="badge badge-info">${user.role}</span></div></div>
+        `;
+    });
+</script>
+{% endblock %}
