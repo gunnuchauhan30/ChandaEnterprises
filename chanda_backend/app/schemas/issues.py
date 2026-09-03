@@ -7,6 +7,7 @@ from decimal import Decimal
 class EmployeeRequestIn(BaseModel):
     material_code: str
     requested_qty: Decimal = Field(gt=0)
+    raised_by_name: str = Field(min_length=1, description="Name of the person raising this request (mandatory)")
     department: Optional[str] = None
     job_card_no: Optional[str] = None
     part_number: Optional[str] = None
@@ -26,6 +27,7 @@ class EmployeeRequestOut(BaseModel):
     requested_qty: Decimal
     fulfilled_qty: Decimal = Decimal("0")
     requested_by: int
+    raised_by_name: Optional[str] = None
     department: Optional[str]
     job_card_no: Optional[str]
     part_number: Optional[str]
