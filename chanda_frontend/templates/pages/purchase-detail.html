@@ -20,13 +20,19 @@
             return;
         }
         const qcColor = p.qc_status === 'passed' ? 'success' : p.qc_status === 'failed' ? 'danger' : 'warning';
+        const acColor = p.accounts_approval_status === 'approved' ? 'success' : p.accounts_approval_status === 'rejected' ? 'danger' : 'warning';
+        const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
+        const canDoAccounts = currentUser.role === 'accounts' || currentUser.role === 'admin';
         card.innerHTML = `
             <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:20px;">
                 <div>
                     <h2 style="color: var(--accent-purple); margin: 0 0 4px;">${p.grn_no}</h2>
                     <div style="color: var(--text-lighter); font-size: 13px;">${p.material_code}</div>
                 </div>
-                <span class="badge badge-${qcColor}">${p.qc_status}</span>
+                <div style="text-align:right;">
+                    <span class="badge badge-${qcColor}">QC: ${p.qc_status}</span><br>
+                    <span class="badge badge-${acColor}" style="margin-top:6px; display:inline-block;">Accounts: ${p.accounts_approval_status}</span>
+                </div>
             </div>
             <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 16px;">
                 <div><div style="font-size:12px; color:var(--text-lighter);">Qty</div><div>${p.qty}</div></div>
@@ -43,6 +49,15 @@
                     <button class="btn btn-danger" onclick="setQC('failed')"><i class="bi bi-x-lg"></i> Fail QC</button>
                 </div>
             ` : ''}
+            ${(p.qc_status === 'passed' && p.accounts_approval_status === 'pending' && canDoAccounts) ? `
+                <div style="display:flex; gap:12px; margin-top:20px;">
+                    <button class="btn btn-success" onclick="setAccounts('approved')"><i class="bi bi-check-lg"></i> Accounts Approve (adds to stock)</button>
+                    <button class="btn btn-danger" onclick="setAccounts('rejected')"><i class="bi bi-x-lg"></i> Reject</button>
+                </div>
+            ` : ''}
+            ${(p.qc_status === 'passed' && p.accounts_approval_status === 'pending' && !canDoAccounts) ? `
+                <div style="margin-top:20px; color:#999; font-size:13px;">Awaiting Accounts approval -- stock will update once approved.</div>
+            ` : ''}
             <div style="margin-top:20px;">
                 <a href="/purchases" class="btn btn-secondary">← Back to Purchases</a>
             </div>
@@ -55,6 +70,16 @@
         const result = await API.updateQCStatus(purchaseId, status, remarks);
         if (result) {
             showAlert(`QC marked as ${status}`, 'success');
+            window.location.reload();
+        }
+    }
+
+    async function setAccounts(status) {
+        let remarks = '';
+        if (status === 'rejected') remarks = prompt('Reason for rejection (optional):') || '';
+        const result = await API.accountsApprovePurchase(purchaseId, status, remarks);
+        if (result) {
+            showAlert(`Accounts ${status} -- ${status === 'approved' ? 'stock updated' : 'no stock change'}`, 'success');
             window.location.reload();
         }
     }
