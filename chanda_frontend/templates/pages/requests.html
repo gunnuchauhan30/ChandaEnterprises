@@ -23,8 +23,8 @@
             <table>
                 <thead>
                     <tr>
-                        <th>Request No</th><th>Request Date</th><th>Material</th><th>Supplier</th><th>Qty</th><th>Fulfilled</th><th>Pending</th>
-                        <th>Due Date</th><th>Department</th><th>Status</th><th>Actions</th>
+                        <th>Request No</th><th>Request Date</th><th>Material</th><th>Raised By</th><th>Qty</th><th>Fulfilled</th><th>Pending</th>
+                        <th>Department</th><th>Status</th><th>Actions</th>
                     </tr>
                 </thead>
                 <tbody id="requestsBody">
@@ -60,38 +60,39 @@
         if (response.items && response.items.length > 0) {
             response.items.forEach(r => {
                 const row = tbody.insertRow();
-                const color = r.status === 'completed' ? 'success' : r.status === 'rejected' ? 'danger' : r.status === 'partial' ? 'info' : 'warning';
-                
+                const color = r.status === 'completed' ? 'success' : r.status === 'rejected' ? 'danger' : r.status === 'partial' ? 'info' : r.status === 'approved' ? 'info' : 'warning';
+                const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
+                const canDecide = currentUser.role === 'operation' || currentUser.role === 'admin';
+
                 // Format date to IST
                 const formatDate = (dateStr) => {
                     if (!dateStr) return '-';
                     const d = new Date(dateStr);
                     return d.toLocaleDateString('en-IN', { year: '2-digit', month: 'short', day: '2-digit' });
                 };
-                
+
                 row.innerHTML = `
                     <td><strong>${r.request_no}</strong></td>
                     <td><small>${formatDate(r.created_at)}</small></td>
                     <td>${r.material_code}${r.material_name ? '<br><span style="color:var(--text-lighter); font-size:11px;">' + r.material_name + '</span>' : ''}</td>
-                    <td><small>${r.supplier_name || '-'}</small></td>
+                    <td><small>${r.raised_by_name || '-'}</small></td>
                     <td>${r.requested_qty}</td>
                     <td>${r.fulfilled_qty ?? 0}</td>
                     <td>${r.pending_qty ?? (r.requested_qty - (r.fulfilled_qty || 0))}</td>
-                    <td><small>${formatDate(r.due_date)}</small></td>
                     <td>${r.department || '-'}</td>
                     <td><span class="badge badge-${color}">${r.status}</span></td>
                     <td>
-                        ${(r.status === 'pending' || r.status === 'partial') ? `
-                            <button class="btn btn-sm btn-success" onclick="decide(${r.id}, 'approve')" title="Approve / Issue available"><i class="bi bi-check-lg"></i></button>
+                        ${((r.status === 'pending' || r.status === 'partial') && canDecide) ? `
+                            <button class="btn btn-sm btn-success" onclick="decide(${r.id}, 'approve')" title="Approve (Operation sign-off)"><i class="bi bi-check-lg"></i></button>
                             ${r.status === 'pending' ? `<button class="btn btn-sm btn-danger" onclick="decide(${r.id}, 'reject')" title="Reject"><i class="bi bi-x-lg"></i></button>` : ''}
-                        ` : ''}
+                        ` : ((r.status === 'pending' || r.status === 'partial') ? '<span style="color:#999; font-size:12px;">Awaiting Operation</span>' : '')}
                     </td>
                 `;
             });
             document.getElementById('pageInfo').textContent = `Page ${currentPage}`;
             document.getElementById('nextBtn').disabled = response.items.length < pageSize;
         } else {
-            tbody.innerHTML = '<tr><td colspan="11" style="text-align: center; color: #999;">No requests found</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="10" style="text-align: center; color: #999;">No requests found</td></tr>';
         }
     }
 
@@ -102,7 +103,7 @@
     async function decide(id, action) {
         let result;
         if (action === 'approve') {
-            if (!confirm('Approve this request? Whatever is available in store will be issued now; any shortfall queues as a FIFO backorder.')) return;
+            if (!confirm('Approve this request? This only records Operation\'s approval -- Store will separately create the actual issue afterwards.')) return;
             result = await API.approveRequest(id);
         } else {
             const reason = prompt('Rejection reason (optional):') || '';
