@@ -8,6 +8,10 @@
         <form id="requestForm">
             <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; margin-bottom: 10px;">
                 <div class="form-group">
+                    <label for="raised_by_name">Raised By (Name) *</label>
+                    <input type="text" id="raised_by_name" required placeholder="Your name">
+                </div>
+                <div class="form-group">
                     <label for="department">Department</label>
                     <input type="text" id="department">
                 </div>
@@ -15,6 +19,8 @@
                     <label for="job_card_no">Job Card No</label>
                     <input type="text" id="job_card_no">
                 </div>
+            </div>
+            <div style="display: grid; grid-template-columns: 1fr; gap: 20px; margin-bottom: 10px;">
                 <div class="form-group">
                     <label for="part_number">Part Number</label>
                     <input type="text" id="part_number">
@@ -138,6 +144,11 @@
 
     document.getElementById('requestForm').addEventListener('submit', async (e) => {
         e.preventDefault();
+        const raisedByName = document.getElementById('raised_by_name').value.trim();
+        if (!raisedByName) {
+            showAlert('Please enter the name of the person raising this request.', 'danger');
+            return;
+        }
         const rows = document.querySelectorAll('.item-row');
         const items = [];
         for (const row of rows) {
@@ -160,6 +171,7 @@
         }
 
         const common = {
+            raised_by_name: raisedByName,
             department: document.getElementById('department').value || null,
             job_card_no: document.getElementById('job_card_no').value || null,
             part_number: document.getElementById('part_number').value || null,
