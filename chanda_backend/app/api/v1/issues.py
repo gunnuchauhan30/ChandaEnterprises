@@ -117,22 +117,19 @@ def _issue_against_request(db: Session, req: EmployeeRequest, fulfill_qty, issue
 def decide_request(
     request_id: int,
     payload: EmployeeRequestDecision,
-    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles("store_manager")),
+    current_user: User = Depends(require_roles("operation", "admin")),
 ):
     """
-    Approve/reject a request.
+    Approve/reject a request. This is the OPERATION sign-off only.
 
-    Point 11 (stock only ever moves after approval): unchanged and confirmed --
-    nothing here touches material.current_qty until this endpoint runs; a
-    pending request never reserves or deducts stock by itself.
-
-    Point 12 (FIFO backorders): if there isn't enough available stock to
-    cover the whole request, we issue whatever IS available right now and
-    leave the rest as `pending_qty` with status='partial'. It then sits in
-    the FIFO backorder queue (oldest request first) and gets topped up
-    automatically as new stock arrives (see process_backorders below).
+    IMPORTANT (changed): approving here no longer creates an Issue or moves
+    any stock. It only flips status to 'approved'. Store then creates the
+    actual Issue from this approved request as a separate step, and stock
+    only moves once Accounts approves that Issue -- see issues endpoints
+    below. This keeps three distinct people/steps in the loop: Operation
+    approves the request itself, Store decides how/when to issue it,
+    Accounts is the final gate before stock actually changes.
     """
     req = db.query(EmployeeRequest).get(request_id)
     if not req:
@@ -141,28 +138,9 @@ def decide_request(
         raise HTTPException(400, f"Request already {req.status}")
 
     if payload.action == "approve":
-        # Lock the material row for the rest of this transaction. Without
-        # this, two approvals for the same material at nearly the same
-        # moment could both read the same available_qty, both think there's
-        # enough stock, and the second one would crash with a 500 when the
-        # DB's own overselling guard (fn_post_stock_ledger) rejects it. The
-        # lock makes the second request simply wait a moment and then see
-        # the correct, now-updated stock instead of racing.
-        material = db.query(Material).filter(Material.material_code == req.material_code).with_for_update().first()
-        remaining_needed = req.requested_qty - (req.fulfilled_qty or 0)
-        fulfill_qty = min(material.available_qty, remaining_needed)
-
-        if fulfill_qty <= 0:
-            raise HTTPException(400, f"No stock available right now: have {material.available_qty}")
-
-        _issue_against_request(db, req, fulfill_qty, current_user.id)
+        req.status = "approved"
         req.approved_by = current_user.id
         req.approved_at = func.now()
-
-        if req.fulfilled_qty >= req.requested_qty:
-            req.status = "completed"
-        else:
-            req.status = "partial"  # rest queued as FIFO backorder
 
     elif payload.action == "reject":
         req.status = "rejected"
@@ -175,13 +153,9 @@ def decide_request(
     db.refresh(req)
     log_activity(
         db, current_user.id,
-        f"{payload.action.title()}d request {req.request_no}"
-        + (f" ({req.status})" if payload.action == "approve" else ""),
+        f"{payload.action.title()}d request {req.request_no}",
         "employee_requests",
     )
-
-    if payload.action == "approve":
-        background_tasks.add_task(_notify_alerts_task, req.material_code)
 
     return req
 
