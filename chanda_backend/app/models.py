@@ -21,6 +21,8 @@ class UserRole(str, PyEnum):
     production = "production"
     management = "management"
     quality = "quality"  # QC pass/fail on GRNs only -- nothing else
+    operation = "operation"  # approves employee material requests
+    accounts = "accounts"    # final approval on GRN + Issues -- only step that moves stock
 
 
 class MaterialType(str, PyEnum):
