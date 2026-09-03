@@ -22,6 +22,11 @@ class PurchaseQCUpdate(BaseModel):
     qc_remarks: Optional[str] = None
 
 
+class PurchaseAccountsApproval(BaseModel):
+    status: str = Field(description="approved|rejected")
+    remarks: Optional[str] = None
+
+
 class PurchaseOut(BaseModel):
     id: int
     grn_no: str
@@ -43,6 +48,9 @@ class PurchaseOut(BaseModel):
     received_by: Optional[int]
     created_by: Optional[int]
     created_at: datetime
+    accounts_approval_status: str = "pending"
+    accounts_approved_by: Optional[int] = None
+    accounts_approved_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
