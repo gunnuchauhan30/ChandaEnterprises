@@ -1,0 +1,195 @@
+{% extends "base.html" %}
+{% block title %}New Issue - Chanda Enterprises{% endblock %}
+{% block page_title %}New Direct Issue{% endblock %}
+
+{% block content %}
+<div class="container-fluid" style="max-width: 700px; margin: 0 auto;">
+    <div class="glass card-3d" style="padding: 30px; border-radius: 12px;">
+        <form id="issueForm">
+            <div class="form-group" style="position: relative;">
+                <label for="material_search">Material *</label>
+                <input type="text" id="material_search" placeholder="Type material code, name or grade..." autocomplete="off" required
+                       style="padding: 10px 14px; background: var(--glass-dark); border: 1px solid var(--glass-medium); border-radius: 8px; color: var(--text-light); width: 100%;">
+                <input type="hidden" id="material_code">
+                <div id="material_suggestions" style="position:absolute; top:100%; left:0; right:0; z-index:20; background: var(--glass-dark); border: 1px solid var(--glass-medium); border-radius: 8px; margin-top: 4px; max-height: 220px; overflow-y: auto;"></div>
+            </div>
+            <div class="form-group">
+                <label for="issue_qty">Issue Quantity *</label>
+                <input type="number" id="issue_qty" step="0.01" min="0.01" required onchange="checkFIFO()">
+            </div>
+
+            <!-- FIFO Supplier Breakdown Section (flow-diagram style) -->
+            <div id="fifoSection" style="display:none; background: var(--glass-dark); padding: 18px; border-radius: 8px; margin: 15px 0; border-left: 4px solid #f59e0b;">
+                <h4 style="margin-top: 0; margin-bottom: 4px; color: #f59e0b;">📦 FIFO Supplier Breakdown</h4>
+                <div style="font-size: 12px; color: var(--text-lighter); margin-bottom: 14px;">Oldest stock is issued first. This is exactly how it will be deducted on approval.</div>
+
+                <div id="fifoFlow"></div>
+
+                <div id="fifoTotalRow" style="display:flex; justify-content:space-between; align-items:center; margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--glass-medium);">
+                    <span style="font-weight:bold; color:#fff;">TOTAL</span>
+                    <div id="fifoTotalNumbers" style="display:flex; gap:22px; font-size:14px;"></div>
+                </div>
+                <div id="fifoSummary" style="margin-top: 10px; font-weight: bold;"></div>
+            </div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+                <div class="form-group"><label for="job_card_no">Job Card No</label><input type="text" id="job_card_no"></div>
+                <div class="form-group"><label for="production_order_no">Production Order No</label><input type="text" id="production_order_no"></div>
+                <div class="form-group"><label for="part_number">Part Number</label><input type="text" id="part_number"></div>
+                <div class="form-group"><label for="machine">Machine</label><input type="text" id="machine"></div>
+                <div class="form-group"><label for="operation">Operation</label><input type="text" id="operation"></div>
+                <div class="form-group"><label for="department">Department</label><input type="text" id="department"></div>
+                <div class="form-group"><label for="shift">Shift</label><input type="text" id="shift"></div>
+                <div class="form-group"><label for="required_qty">Required Qty</label><input type="number" id="required_qty" step="0.01"></div>
+            </div>
+            <div class="form-group"><label for="remark">Remark</label><textarea id="remark"></textarea></div>
+            <div style="display: flex; gap: 12px;">
+                <button type="submit" class="btn btn-primary"><i class="bi bi-list-check"></i> Continue → FIFO Preview</button>
+                <a href="/issues" class="btn btn-secondary">Cancel</a>
+            </div>
+        </form>
+    </div>
+</div>
+
+<style>
+    #material_suggestions div { padding: 8px 12px; cursor: pointer; }
+    #material_suggestions div:hover { background: var(--glass-medium); }
+</style>
+
+<script>
+    let debounceTimer;
+    const searchInput = document.getElementById('material_search');
+    const suggestBox = document.getElementById('material_suggestions');
+
+    searchInput.addEventListener('input', () => {
+        document.getElementById('material_code').value = '';
+        clearTimeout(debounceTimer);
+        const q = searchInput.value.trim();
+        if (!q) { suggestBox.innerHTML = ''; return; }
+        debounceTimer = setTimeout(async () => {
+            const res = await API.getMaterials(1, 10, q);
+            const items = (res && res.items) ? res.items : [];
+            suggestBox.innerHTML = items.map(m => `
+                <div onclick='pickMaterial(${JSON.stringify(m.material_code)}, ${JSON.stringify(m.material_name)}, ${JSON.stringify(m.grade || "")}, ${m.available_qty})'>
+                    <strong>${m.material_code}</strong> — ${m.material_name}${m.grade ? ' (' + m.grade + ')' : ''}
+                    <span style="color:#999;"> · avail: ${m.available_qty}</span>
+                </div>
+            `).join('') || '<div style="color:#999;">No matches</div>';
+        }, 200);
+    });
+
+    document.addEventListener('click', (e) => {
+        if (!e.target.closest('.form-group')) suggestBox.innerHTML = '';
+    });
+
+    function pickMaterial(code, name, grade, availableQty) {
+        searchInput.value = `${code} - ${name}${grade ? ' (' + grade + ')' : ''} (avail: ${availableQty})`;
+        document.getElementById('material_code').value = code;
+        suggestBox.innerHTML = '';
+        checkFIFO();
+    }
+
+    async function checkFIFO() {
+        const materialCode = document.getElementById('material_code').value;
+        const quantity = parseFloat(document.getElementById('issue_qty').value) || 0;
+
+        if (!materialCode || !quantity) {
+            document.getElementById('fifoSection').style.display = 'none';
+            return;
+        }
+
+        // Real backend contract: POST /issues/fifo-check { material_code, quantity }
+        const fifo = await API.request('/issues/fifo-check', {
+            method: 'POST',
+            body: { material_code: materialCode, quantity: quantity }
+        });
+
+        if (!fifo || !fifo.allocation) {
+            document.getElementById('fifoSection').style.display = 'none';
+            return;
+        }
+
+        renderFifoFlow(fifo);
+        document.getElementById('fifoSection').style.display = 'block';
+    }
+
+    function renderFifoFlow(fifo) {
+        const flow = document.getElementById('fifoFlow');
+
+        if (!fifo.allocation.length) {
+            flow.innerHTML = `<div style="color:#999; padding: 10px 0;">No stock batches found for this material.</div>`;
+        } else {
+            flow.innerHTML = fifo.allocation.map((item, idx) => {
+                const willIssue = item.issue_qty > 0;
+                const accent = willIssue ? '#4ade80' : 'var(--glass-medium)';
+                return `
+                <div style="display:flex; align-items:stretch; gap:10px; margin-bottom: ${idx === fifo.allocation.length - 1 ? '0' : '8px'};">
+                    <div style="width:26px; display:flex; flex-direction:column; align-items:center;">
+                        <div style="width:10px; height:10px; border-radius:50%; background:${accent}; margin-top:14px;"></div>
+                        ${idx === fifo.allocation.length - 1 ? '' : `<div style="flex:1; width:2px; background:var(--glass-medium); margin-top:2px;"></div>`}
+                    </div>
+                    <div style="flex:1; background: var(--glass-medium); border-radius:8px; padding:12px 14px; ${willIssue ? 'border:1px solid rgba(74,222,128,0.35);' : 'opacity:0.6;'}">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                            <div style="font-weight:bold; color:#fff;">🏭 ${item.supplier_name}</div>
+                            <div style="font-size:11px; color:#999;">Received: ${item.received_date || '-'} · Batch ${item.batch_no}</div>
+                        </div>
+                        <div style="display:flex; align-items:center; gap:8px; font-size:13px; flex-wrap:wrap;">
+                            <span style="color:#93c5fd;">Available <b>${item.available}</b></span>
+                            <span style="color:#666;">→</span>
+                            <span style="color:${willIssue ? '#4ade80' : '#999'};">Issue <b>${item.issue_qty}</b></span>
+                            <span style="color:#666;">→</span>
+                            <span style="color:#f59e0b;">Remaining <b>${item.remaining_after}</b></span>
+                        </div>
+                    </div>
+                </div>`;
+            }).join('');
+        }
+
+        document.getElementById('fifoTotalNumbers').innerHTML = `
+            <span style="color:#93c5fd;">Available: <b>${fifo.total_available}</b></span>
+            <span style="color:#4ade80;">Allocated: <b>${fifo.total_allocated}</b></span>
+        `;
+
+        const summary = document.getElementById('fifoSummary');
+        if (fifo.status === 'success') {
+            summary.style.color = '#4ade80';
+            summary.innerHTML = `✓ Full quantity (${fifo.quantity_requested}) can be issued via FIFO.`;
+        } else {
+            summary.style.color = '#ef4444';
+            summary.innerHTML = `⚠ Insufficient stock — short by ${fifo.shortfall} ${fifo.uom || ''}.`;
+        }
+    }
+
+    document.getElementById('issueForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const materialCode = document.getElementById('material_code').value;
+        if (!materialCode) {
+            showAlert('Please pick a material from the suggestions list.', 'danger');
+            return;
+        }
+        const qty = parseFloat(document.getElementById('issue_qty').value);
+        if (!qty || qty <= 0) {
+            showAlert('Please enter a valid Issue Quantity.', 'danger');
+            return;
+        }
+        const payload = {
+            material_code: materialCode,
+            issue_qty: qty,
+            job_card_no: document.getElementById('job_card_no').value || null,
+            production_order_no: document.getElementById('production_order_no').value || null,
+            part_number: document.getElementById('part_number').value || null,
+            machine: document.getElementById('machine').value || null,
+            operation: document.getElementById('operation').value || null,
+            department: document.getElementById('department').value || null,
+            shift: document.getElementById('shift').value || null,
+            required_qty: document.getElementById('required_qty').value ? parseFloat(document.getElementById('required_qty').value) : null,
+            remark: document.getElementById('remark').value || null,
+        };
+        // Don't create the issue yet -- hand off to the dedicated FIFO
+        // confirmation page, which shows the supplier breakdown (oldest
+        // date first) and only THEN actually creates the issue.
+        sessionStorage.setItem('pendingIssuePayload', JSON.stringify(payload));
+        sessionStorage.setItem('pendingIssueMaterialLabel', searchInput.value);
+        window.location.href = '/issues/fifo-preview';
+    });
+</script>
+{% endblock %}

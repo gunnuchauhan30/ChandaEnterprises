@@ -1,0 +1,174 @@
+{% extends "base.html" %}
+{% block title %}FIFO Preview - Chanda Enterprises{% endblock %}
+{% block page_title %}FIFO Supplier Breakdown{% endblock %}
+
+{% block content %}
+<div class="container-fluid" style="max-width: 800px; margin: 0 auto;">
+
+    <div id="loadingBox" class="glass card-3d" style="padding: 40px; border-radius: 12px; text-align:center;">
+        <div class="spinner"></div>
+        <div style="color:#999; margin-top:10px;">Calculating FIFO allocation...</div>
+    </div>
+
+    <div id="previewBox" class="glass card-3d" style="display:none; padding: 30px; border-radius: 12px;">
+
+        <!-- Header: what's being issued -->
+        <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:20px; padding-bottom:16px; border-bottom:1px solid var(--glass-medium);">
+            <div>
+                <div style="font-size:12px; color:#999; text-transform:uppercase; letter-spacing:0.5px;">Issuing</div>
+                <div id="hdrMaterial" style="font-size:20px; font-weight:bold; color:#fff; margin-top:4px;"></div>
+            </div>
+            <div style="text-align:right;">
+                <div style="font-size:12px; color:#999; text-transform:uppercase; letter-spacing:0.5px;">Quantity</div>
+                <div id="hdrQty" style="font-size:20px; font-weight:bold; color:#f59e0b; margin-top:4px;"></div>
+            </div>
+        </div>
+
+        <div style="font-size:13px; color:var(--text-lighter); margin-bottom:18px;">
+            📅 FIFO order — <b>oldest supplier stock is deducted first.</b> Below is exactly which supplier this quantity will come from.
+        </div>
+
+        <!-- FIFO flow -->
+        <div id="fifoFlow"></div>
+
+        <!-- Total row -->
+        <div id="fifoTotalRow" style="display:flex; justify-content:space-between; align-items:center; margin-top: 18px; padding-top: 14px; border-top: 1px dashed var(--glass-medium);">
+            <span style="font-weight:bold; color:#fff; font-size:15px;">TOTAL</span>
+            <div id="fifoTotalNumbers" style="display:flex; gap:24px; font-size:15px;"></div>
+        </div>
+        <div id="fifoStatus" style="margin-top: 14px; padding: 12px 14px; border-radius:8px; font-weight:bold; font-size:14px;"></div>
+
+        <!-- Extra details entered on the form (recap) -->
+        <div id="extraDetails" style="margin-top:20px; padding-top:16px; border-top:1px solid var(--glass-medium); font-size:13px; color:#999;"></div>
+
+        <!-- Actions -->
+        <div style="display:flex; gap:12px; margin-top:26px;">
+            <button id="confirmBtn" class="btn btn-primary" onclick="confirmIssue()"><i class="bi bi-check-lg"></i> Confirm &amp; Create Issue</button>
+            <a href="/issues/new" class="btn btn-secondary"><i class="bi bi-arrow-left"></i> Back / Edit</a>
+        </div>
+    </div>
+
+    <div id="errorBox" class="glass card-3d" style="display:none; padding: 30px; border-radius: 12px; text-align:center;">
+        <div style="color:#ef4444; font-weight:bold; margin-bottom:12px;">Could not load FIFO preview.</div>
+        <a href="/issues/new" class="btn btn-secondary">← Back to New Issue</a>
+    </div>
+</div>
+
+<script>
+    let pendingPayload = null;
+
+    document.addEventListener('DOMContentLoaded', async () => {
+        const raw = sessionStorage.getItem('pendingIssuePayload');
+        if (!raw) {
+            // Nothing pending -- probably a page refresh or direct visit.
+            window.location.href = '/issues/new';
+            return;
+        }
+        pendingPayload = JSON.parse(raw);
+
+        const fifo = await API.request('/issues/fifo-check', {
+            method: 'POST',
+            body: { material_code: pendingPayload.material_code, quantity: pendingPayload.issue_qty }
+        });
+
+        document.getElementById('loadingBox').style.display = 'none';
+
+        if (!fifo) {
+            document.getElementById('errorBox').style.display = 'block';
+            return;
+        }
+
+        renderPreview(fifo);
+        document.getElementById('previewBox').style.display = 'block';
+    });
+
+    function renderPreview(fifo) {
+        document.getElementById('hdrMaterial').textContent = `${fifo.material_code} — ${fifo.material_name}`;
+        document.getElementById('hdrQty').textContent = `${fifo.quantity_requested} ${fifo.uom || ''}`;
+
+        const flow = document.getElementById('fifoFlow');
+        if (!fifo.allocation.length) {
+            flow.innerHTML = `<div style="color:#999; padding: 14px 0;">No stock batches found for this material.</div>`;
+        } else {
+            flow.innerHTML = fifo.allocation.map((item, idx) => {
+                const willIssue = item.issue_qty > 0;
+                const accent = willIssue ? '#4ade80' : 'var(--glass-medium)';
+                const isLast = idx === fifo.allocation.length - 1;
+                return `
+                <div style="display:flex; align-items:stretch; gap:12px; margin-bottom: ${isLast ? '0' : '10px'};">
+                    <div style="width:30px; display:flex; flex-direction:column; align-items:center;">
+                        <div style="width:26px; height:26px; border-radius:50%; background:${willIssue ? 'rgba(74,222,128,0.15)' : 'var(--glass-medium)'}; border:2px solid ${accent}; display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:bold; color:${willIssue ? '#4ade80' : '#999'};">${idx + 1}</div>
+                        ${isLast ? '' : `<div style="flex:1; width:2px; background:var(--glass-medium); margin:2px 0;"></div>`}
+                    </div>
+                    <div style="flex:1; background: var(--glass-medium); border-radius:10px; padding:14px 16px; ${willIssue ? 'border:1px solid rgba(74,222,128,0.35);' : 'opacity:0.55;'}">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; flex-wrap:wrap; gap:6px;">
+                            <div style="font-weight:bold; color:#fff; font-size:15px;">🏭 ${item.supplier_name}</div>
+                            <div style="font-size:12px; color:#999;">📅 ${item.received_date || '-'} · Batch ${item.batch_no}${idx === 0 ? ' <span style="color:#f59e0b;">(oldest — issued first)</span>' : ''}</div>
+                        </div>
+                        <div style="display:flex; align-items:center; gap:10px; font-size:14px; flex-wrap:wrap;">
+                            <span style="color:#93c5fd;">Available <b>${item.available}</b></span>
+                            <span style="color:#666;">→</span>
+                            <span style="color:${willIssue ? '#4ade80' : '#999'}; font-weight:bold;">Issue ${item.issue_qty}</span>
+                            <span style="color:#666;">→</span>
+                            <span style="color:#f59e0b;">Remaining <b>${item.remaining_after}</b></span>
+                        </div>
+                    </div>
+                </div>`;
+            }).join('');
+        }
+
+        document.getElementById('fifoTotalNumbers').innerHTML = `
+            <span style="color:#93c5fd;">Available: <b>${fifo.total_available}</b></span>
+            <span style="color:#4ade80;">Allocated: <b>${fifo.total_allocated}</b></span>
+        `;
+
+        const statusBox = document.getElementById('fifoStatus');
+        const confirmBtn = document.getElementById('confirmBtn');
+        if (fifo.status === 'success') {
+            statusBox.style.background = 'rgba(74,222,128,0.1)';
+            statusBox.style.color = '#4ade80';
+            statusBox.innerHTML = `✓ Full quantity (${fifo.quantity_requested}) is available and can be issued via FIFO.`;
+            confirmBtn.disabled = false;
+        } else {
+            statusBox.style.background = 'rgba(239,68,68,0.1)';
+            statusBox.style.color = '#ef4444';
+            statusBox.innerHTML = `⚠ Insufficient stock — short by ${fifo.shortfall} ${fifo.uom || ''}. You can still issue what's available, or go back and reduce the quantity.`;
+            confirmBtn.disabled = false;
+        }
+
+        // Recap of the other form fields, so nothing is silently lost
+        const extras = [
+            ['Job Card No', pendingPayload.job_card_no],
+            ['Production Order No', pendingPayload.production_order_no],
+            ['Part Number', pendingPayload.part_number],
+            ['Machine', pendingPayload.machine],
+            ['Operation', pendingPayload.operation],
+            ['Department', pendingPayload.department],
+            ['Shift', pendingPayload.shift],
+            ['Required Qty', pendingPayload.required_qty],
+            ['Remark', pendingPayload.remark],
+        ].filter(([, v]) => v !== null && v !== undefined && v !== '');
+        document.getElementById('extraDetails').innerHTML = extras.length
+            ? extras.map(([label, val]) => `<div style="margin-bottom:4px;"><b style="color:#ccc;">${label}:</b> ${val}</div>`).join('')
+            : '';
+    }
+
+    async function confirmIssue() {
+        if (!pendingPayload) return;
+        const btn = document.getElementById('confirmBtn');
+        btn.disabled = true;
+        btn.innerHTML = '<div class="spinner" style="width:16px;height:16px;display:inline-block;"></div> Creating...';
+
+        const result = await API.createIssue(pendingPayload);
+        if (result) {
+            sessionStorage.removeItem('pendingIssuePayload');
+            sessionStorage.removeItem('pendingIssueMaterialLabel');
+            showAlert(`Issue ${result.issue_no} created`, 'success');
+            setTimeout(() => window.location.href = '/issues', 800);
+        } else {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-check-lg"></i> Confirm &amp; Create Issue';
+        }
+    }
+</script>
+{% endblock %}

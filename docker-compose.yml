@@ -1,0 +1,72 @@
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    # chanda_backend/.env mein already POSTGRES_DB / POSTGRES_USER / POSTGRES_PASSWORD hain
+    env_file:
+      - ./chanda_backend/.env
+    volumes:
+      - chanda_pgdata:/var/lib/postgresql/data
+      # Sirf first container start pe (empty data dir) run hoga.
+      - ./chanda_backend/schema.sql:/docker-entrypoint-initdb.d/1_schema.sql:ro
+      - ./chanda_backend/data_import.sql:/docker-entrypoint-initdb.d/2_data_import.sql:ro
+    # Production mein DB port host pe expose NAHI kiya — sirf backend container
+    # 'chanda-net' network ke through 'db:5432' pe isse access karega.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - chanda-net
+
+  backend:
+    build:
+      context: ./chanda_backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - ./chanda_backend/.env
+    environment:
+      # .env ke localhost wale DATABASE_URL ko override karke docker network
+      # ke andar db service ka naam use karte hain. Password .env ke
+      # POSTGRES_PASSWORD se match hona chahiye.
+      DATABASE_URL: postgresql+psycopg2://postgres:postgres@db:5432/chanda_store
+    volumes:
+      - ./chanda_backend/uploads:/app/uploads
+      - ./chanda_backend/logs:/app/logs
+    ports:
+      - "8000:8000"
+    networks:
+      - chanda-net
+
+  frontend:
+    build:
+      context: ./chanda_frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      - backend
+    env_file:
+      - ./chanda_frontend/.env
+    environment:
+      # Docker network ke andar backend service ka naam use hota hai, localhost nahi.
+      BACKEND_URL: http://backend:8000
+    volumes:
+      - ./chanda_frontend/logs:/app/logs
+    ports:
+      - "5000:5000"
+    # command line ki zaroorat nahi — Dockerfile ka default CMD
+    # (gunicorn -w 4 -b 0.0.0.0:5000 app.main:app) already production-ready hai.
+    networks:
+      - chanda-net
+
+networks:
+  chanda-net:
+    driver: bridge
+
+volumes:
+  chanda_pgdata:

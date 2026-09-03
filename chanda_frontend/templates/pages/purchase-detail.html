@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}GRN Detail - Chanda Enterprises{% endblock %}
+{% block page_title %}Purchase / GRN Detail{% endblock %}
+
+{% block content %}
+<div class="container-fluid" style="max-width: 800px; margin: 0 auto;">
+    <div id="purchaseCard" class="glass card-3d" style="padding: 24px; border-radius: 12px;">
+        <div style="text-align:center; padding: 30px;"><div class="spinner"></div></div>
+    </div>
+</div>
+
+<script>
+    const purchaseId = '{{ purchase_id }}';
+
+    document.addEventListener('DOMContentLoaded', async () => {
+        const p = await API.getPurchase(purchaseId);
+        const card = document.getElementById('purchaseCard');
+        if (!p) {
+            card.innerHTML = '<div style="text-align:center; color:#999; padding:20px;">GRN not found</div>';
+            return;
+        }
+        const qcColor = p.qc_status === 'passed' ? 'success' : p.qc_status === 'failed' ? 'danger' : 'warning';
+        card.innerHTML = `
+            <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:20px;">
+                <div>
+                    <h2 style="color: var(--accent-purple); margin: 0 0 4px;">${p.grn_no}</h2>
+                    <div style="color: var(--text-lighter); font-size: 13px;">${p.material_code}</div>
+                </div>
+                <span class="badge badge-${qcColor}">${p.qc_status}</span>
+            </div>
+            <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+                <div><div style="font-size:12px; color:var(--text-lighter);">Qty</div><div>${p.qty}</div></div>
+                <div><div style="font-size:12px; color:var(--text-lighter);">Unit Cost</div><div>${formatCurrency(p.unit_cost)}</div></div>
+                <div><div style="font-size:12px; color:var(--text-lighter);">Invoice No</div><div>${p.invoice_no || '-'}</div></div>
+                <div><div style="font-size:12px; color:var(--text-lighter);">Invoice Date</div><div>${formatDate(p.invoice_date)}</div></div>
+                <div><div style="font-size:12px; color:var(--text-lighter);">Batch No</div><div>${p.batch_no || '-'}</div></div>
+                <div><div style="font-size:12px; color:var(--text-lighter);">QC Remarks</div><div>${p.qc_remarks || '-'}</div></div>
+                <div><div style="font-size:12px; color:var(--text-lighter);">Created</div><div>${formatDateTime(p.created_at)}</div></div>
+            </div>
+            ${p.qc_status === 'pending' ? `
+                <div style="display:flex; gap:12px; margin-top:20px;">
+                    <button class="btn btn-success" onclick="setQC('passed')"><i class="bi bi-check-lg"></i> Pass QC</button>
+                    <button class="btn btn-danger" onclick="setQC('failed')"><i class="bi bi-x-lg"></i> Fail QC</button>
+                </div>
+            ` : ''}
+            <div style="margin-top:20px;">
+                <a href="/purchases" class="btn btn-secondary">← Back to Purchases</a>
+            </div>
+        `;
+    });
+
+    async function setQC(status) {
+        let remarks = '';
+        if (status === 'failed') remarks = prompt('Reason for QC failure (optional):') || '';
+        const result = await API.updateQCStatus(purchaseId, status, remarks);
+        if (result) {
+            showAlert(`QC marked as ${status}`, 'success');
+            window.location.reload();
+        }
+    }
+</script>
+{% endblock %}

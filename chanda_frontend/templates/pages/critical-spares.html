@@ -1,0 +1,224 @@
+{% extends "base.html" %}
+
+{% block title %}Critical Spares - Chanda Enterprises{% endblock %}
+{% block page_title %}Critical Spares List{% endblock %}
+
+{% block content %}
+<div class="container-fluid" style="max-width: 1400px; margin: 0 auto;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+        <div style="display: flex; gap: 10px;">
+            <input type="text" id="searchInput" placeholder="Search spares..." style="padding: 10px 14px; background: var(--glass-dark); border: 1px solid var(--glass-medium); border-radius: 8px; color: var(--text-light); width: 220px;">
+            <select id="priorityFilter" onchange="loadSpares()" style="padding: 10px 14px; background: var(--glass-dark); border: 1px solid var(--glass-medium); border-radius: 8px; color: var(--text-light);">
+                <option value="">All Priorities</option>
+                <option value="critical">Critical</option>
+                <option value="high">High</option>
+                <option value="medium">Medium</option>
+            </select>
+            <label style="display:flex; align-items:center; gap:6px; font-size: 13px; color: var(--text-lighter); cursor:pointer;">
+                <input type="checkbox" id="belowThresholdOnly" onchange="loadSpares()"> Below threshold only
+            </label>
+        </div>
+        <!-- "Add Critical Spare" removed here on purpose: materials are now
+             marked critical from the Material Master page's checkbox (which
+             auto-creates the entry here), so this page is view/edit-only --
+             having two separate "add" entry points was confusing which one
+             was the source of truth. Editing (pencil icon per row) still
+             works, since it's the same underlying record. -->
+    </div>
+
+    <div class="glass card-3d" style="padding: 24px; border-radius: 12px;">
+        <div class="table-container">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Material Code</th>
+                        <th>Name</th>
+                        <th>Machine</th>
+                        <th>Priority</th>
+                        <th>Current Stock</th>
+                        <th>Threshold</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="sparesBody">
+                    <tr><td colspan="8" style="text-align:center; padding: 30px; color:#999;"><div class="spinner"></div></td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Add/Edit Modal -->
+<div class="modal" id="spareModal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h2 id="spareModalTitle">Add Critical Spare</h2>
+            <button class="close-btn" onclick="closeSpareModal()">&times;</button>
+        </div>
+        <form id="spareForm" onsubmit="submitSpare(event)">
+            <input type="hidden" id="spareId">
+            <div class="form-group">
+                <label>Material Code</label>
+                <input type="text" id="materialCode" required placeholder="Start typing to search..." autocomplete="off">
+                <div id="materialSuggestions" style="background: var(--glass-dark); border-radius: 8px; margin-top: 4px; max-height: 160px; overflow-y: auto;"></div>
+            </div>
+            <div class="form-group">
+                <label>Machine Name</label>
+                <input type="text" id="machineName" placeholder="e.g. CNC Lathe 02">
+            </div>
+            <div class="form-group">
+                <label>Priority</label>
+                <select id="priority">
+                    <option value="critical">Critical</option>
+                    <option value="high">High</option>
+                    <option value="medium">Medium</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Threshold Quantity</label>
+                <input type="number" id="thresholdQty" step="0.01" required placeholder="Flag as critical below this stock">
+            </div>
+            <div class="form-group">
+                <label>Remarks</label>
+                <textarea id="remarks" placeholder="Optional notes"></textarea>
+            </div>
+            <div style="display:flex; gap:10px; justify-content:flex-end;">
+                <button type="button" class="btn btn-secondary" onclick="closeSpareModal()">Cancel</button>
+                <button type="submit" class="btn btn-primary">Save</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+    document.addEventListener('DOMContentLoaded', () => loadSpares());
+
+    let selectedMaterialCode = '';
+
+    async function loadSpares() {
+        const filters = {};
+        const search = document.getElementById('searchInput').value;
+        const priority = document.getElementById('priorityFilter').value;
+        const belowOnly = document.getElementById('belowThresholdOnly').checked;
+        if (search) filters.search = search;
+        if (priority) filters.priority = priority;
+        if (belowOnly) filters.below_threshold_only = 'true';
+
+        const data = await API.getCriticalSpares(filters);
+        const tbody = document.getElementById('sparesBody');
+        tbody.innerHTML = '';
+        const rows = (data && data.items) ? data.items : [];
+
+        if (!rows.length) {
+            tbody.innerHTML = '<tr><td colspan="8" style="text-align:center; color:#999; padding:20px;">No critical spares added yet</td></tr>';
+            return;
+        }
+
+        rows.forEach(s => {
+            const tr = tbody.insertRow();
+            const statusBadge = s.is_below_threshold
+                ? '<span class="badge badge-danger">Attention Needed</span>'
+                : '<span class="badge badge-success">OK</span>';
+            const priorityBadge = { critical: 'badge-danger', high: 'badge-warning', medium: 'badge-info' }[s.priority] || 'badge-info';
+            tr.innerHTML = `
+                <td>${s.material_code}</td>
+                <td>${s.material_name || '-'}</td>
+                <td>${s.machine_name || '-'}</td>
+                <td><span class="badge ${priorityBadge}">${s.priority}</span></td>
+                <td>${s.current_qty ?? '-'} ${s.uom || ''}</td>
+                <td>${s.threshold_qty}</td>
+                <td>${statusBadge}</td>
+                <td>
+                    <button class="btn btn-sm btn-secondary" onclick='openSpareModal(${JSON.stringify(s)})' title="Edit"><i class="bi bi-pencil"></i></button>
+                    <button class="btn btn-sm btn-danger" onclick="deleteSpare(${s.id})" title="Delete"><i class="bi bi-trash"></i></button>
+                </td>
+            `;
+        });
+    }
+
+    document.getElementById('searchInput').addEventListener('input', () => {
+        clearTimeout(window._searchDebounce);
+        window._searchDebounce = setTimeout(loadSpares, 300);
+    });
+
+    function openSpareModal(spare = null) {
+        document.getElementById('spareForm').reset();
+        document.getElementById('materialSuggestions').innerHTML = '';
+        if (spare) {
+            document.getElementById('spareModalTitle').textContent = 'Edit Critical Spare';
+            document.getElementById('spareId').value = spare.id;
+            document.getElementById('materialCode').value = spare.material_code;
+            document.getElementById('materialCode').disabled = true;
+            document.getElementById('machineName').value = spare.machine_name || '';
+            document.getElementById('priority').value = spare.priority;
+            document.getElementById('thresholdQty').value = spare.threshold_qty;
+            document.getElementById('remarks').value = spare.remarks || '';
+            selectedMaterialCode = spare.material_code;
+        } else {
+            document.getElementById('spareModalTitle').textContent = 'Add Critical Spare';
+            document.getElementById('spareId').value = '';
+            document.getElementById('materialCode').disabled = false;
+            selectedMaterialCode = '';
+        }
+        document.getElementById('spareModal').classList.add('active');
+    }
+
+    function closeSpareModal() {
+        document.getElementById('spareModal').classList.remove('active');
+    }
+
+    document.getElementById('materialCode').addEventListener('input', async (e) => {
+        const q = e.target.value;
+        const box = document.getElementById('materialSuggestions');
+        if (!q || document.getElementById('materialCode').disabled) { box.innerHTML = ''; return; }
+        const res = await API.getMaterials(1, 8, q);
+        const items = (res && res.items) ? res.items : [];
+        box.innerHTML = items.map(m => `
+            <div class="glass-sm" style="padding:8px 12px; cursor:pointer; margin-bottom:4px;"
+                 onclick="selectMaterial('${m.material_code}', '${(m.material_name || '').replace(/'/g, "\\'")}')">
+                <strong>${m.material_code}</strong> — ${m.material_name}
+            </div>
+        `).join('') || '<div style="padding:8px 12px; color:#999;">No matches</div>';
+    });
+
+    function selectMaterial(code, name) {
+        document.getElementById('materialCode').value = code;
+        selectedMaterialCode = code;
+        document.getElementById('materialSuggestions').innerHTML = '';
+    }
+
+    async function submitSpare(e) {
+        e.preventDefault();
+        const id = document.getElementById('spareId').value;
+        const payload = {
+            machine_name: document.getElementById('machineName').value || null,
+            priority: document.getElementById('priority').value,
+            threshold_qty: parseFloat(document.getElementById('thresholdQty').value),
+            remarks: document.getElementById('remarks').value || null,
+        };
+
+        let result;
+        if (id) {
+            result = await API.updateCriticalSpare(id, payload);
+        } else {
+            payload.material_code = document.getElementById('materialCode').value;
+            if (!payload.material_code) { showAlert('Select a material first', 'danger'); return; }
+            result = await API.createCriticalSpare(payload);
+        }
+
+        if (result) {
+            showAlert(id ? 'Critical spare updated' : 'Critical spare added', 'success');
+            closeSpareModal();
+            loadSpares();
+        }
+    }
+
+    async function deleteSpare(id) {
+        if (!confirm('Remove this critical spare from the list?')) return;
+        const result = await API.deleteCriticalSpare(id);
+        showAlert('Critical spare removed', 'success');
+        loadSpares();
+    }
+</script>
+{% endblock %}

@@ -1,0 +1,289 @@
+{% extends "base.html" %}
+
+{% block title %}Materials - Chanda Enterprises{% endblock %}
+{% block page_title %}Material Master{% endblock %}
+
+{% block content %}
+<div class="container-fluid" style="max-width: 1400px; margin: 0 auto;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+        <div style="display: flex; gap: 10px;">
+            <input type="text" id="searchInput" placeholder="Search materials..." style="padding: 10px 14px; background: var(--glass-dark); border: 1px solid var(--glass-medium); border-radius: 8px; color: var(--text-light); width: 250px;">
+            <button onclick="searchMaterials()" class="btn btn-secondary">
+                <i class="bi bi-search"></i> Search
+            </button>
+        </div>
+        <div style="display: flex; gap: 10px;">
+            <a href="/materials/new" class="btn btn-primary">
+                <i class="bi bi-plus"></i> New Material
+            </a>
+            <button onclick="importExcel()" class="btn btn-secondary">
+                <i class="bi bi-upload"></i> Import
+            </button>
+            <button onclick="exportExcel()" class="btn btn-secondary">
+                <i class="bi bi-download"></i> Export
+            </button>
+        </div>
+    </div>
+
+    <div class="glass card-3d" style="padding: 24px; border-radius: 12px;">
+        <div class="table-container">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Material Code</th>
+                        <th>Name</th>
+                        <th>Category</th>
+                        <th>Grade</th>
+                        <th>UOM</th>
+                        <th>Current Stock</th>
+                        <th>Min/Max</th>
+                        <th>Critical</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="materialsBody">
+                    <tr>
+                        <td colspan="10" style="text-align: center; padding: 30px; color: #999;">
+                            <div class="spinner"></div>
+                            <div style="margin-top: 10px;">Loading materials...</div>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Pagination -->
+        <div style="display: flex; justify-content: center; align-items: center; gap: 10px; margin-top: 20px;">
+            <button onclick="previousPage()" class="btn btn-secondary btn-sm">← Previous</button>
+            <span id="pageInfo" style="color: var(--text-lighter);">Page 1</span>
+            <button onclick="nextPage()" id="nextBtn" class="btn btn-secondary btn-sm">Next →</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    let currentPage = 1;
+    const pageSize = 20;
+
+    document.addEventListener('DOMContentLoaded', () => {
+        loadMaterials();
+    });
+
+    async function loadMaterials(search = '') {
+        const response = await API.getMaterials(currentPage, pageSize, search);
+        if (!response) return;
+
+        // Point 3: pull the Critical Spares list so materials that also live on
+        // that separate page get a badge here -- pages stay separate, data links up.
+        // Map material_code -> critical_spare id (so we can un-tick / delete it later).
+        window.criticalSpareMap = window.criticalSpareMap || {};
+        try {
+            const spares = await API.getCriticalSpares();
+            const spareItems = Array.isArray(spares) ? spares : (spares && spares.items) || [];
+            window.criticalSpareMap = {};
+            spareItems.forEach(s => { window.criticalSpareMap[s.material_code] = s.id; });
+        } catch (e) { /* non-fatal, badge just won't show */ }
+
+        const tbody = document.getElementById('materialsBody');
+        tbody.innerHTML = '';
+
+        if (response.items && response.items.length > 0) {
+            response.items.forEach(mat => {
+                const row = tbody.insertRow();
+                row.id = `matrow-${mat.material_code}`;
+                row.dataset.material = JSON.stringify(mat);
+                renderRowView(row, mat, Object.prototype.hasOwnProperty.call(window.criticalSpareMap, mat.material_code));
+            });
+            document.getElementById('pageInfo').textContent = `Page ${currentPage}`;
+            document.getElementById('nextBtn').disabled = response.items.length < pageSize;
+        } else {
+            tbody.innerHTML = '<tr><td colspan="10" style="text-align: center; color: #999;">No materials found</td></tr>';
+        }
+    }
+
+    // ---- Point: Material Master list -- inline edit for Category, Grade
+    // and Current Stock, without leaving the list / opening a separate page.
+
+    function esc(v) {
+        return (v === null || v === undefined) ? '' : String(v).replace(/"/g, '&quot;');
+    }
+
+    function renderRowView(row, mat, isCritical) {
+        const status = mat.current_qty <= mat.min_qty ? 'danger' : 'success';
+        row.innerHTML = `
+            <td>${mat.material_code}</td>
+            <td>${mat.material_name}</td>
+            <td>${mat.category || 'N/A'}</td>
+            <td>${mat.grade || 'N/A'}</td>
+            <td>${mat.uom}</td>
+            <td>${mat.current_qty}</td>
+            <td>${mat.min_qty}/${mat.max_qty}</td>
+            <td style="text-align:center;">
+                <input type="checkbox" ${isCritical ? 'checked' : ''} 
+                       onchange="toggleCritical('${mat.material_code}', '${esc(mat.material_name)}', this.checked, ${mat.min_qty || 0})"
+                       style="width:18px; height:18px; cursor:pointer;" title="Mark as Critical Spare">
+                ${isCritical ? '<span class="badge badge-danger" style="margin-left:4px;">⚠</span>' : ''}
+            </td>
+            <td><span class="badge badge-${status}">${mat.status}</span></td>
+            <td style="white-space: nowrap;">
+                <button class="btn btn-sm btn-secondary" title="Edit" onclick="renderRowEdit('${mat.material_code}')">
+                    <i class="bi bi-pencil"></i>
+                </button>
+                <a href="/materials/${mat.material_code}" class="btn btn-sm btn-secondary" title="View">
+                    <i class="bi bi-eye"></i>
+                </a>
+                <button class="btn btn-sm btn-danger" title="Delete (e.g. a duplicate entry)" onclick="deleteMaterialRow('${mat.material_code}', '${esc(mat.material_name)}')">
+                    <i class="bi bi-trash"></i>
+                </button>
+            </td>
+        `;
+    }
+
+    // Point 1: Tick "Critical" checkbox -> auto-add to Critical Spares list
+    // (shows up on the Critical Spares page immediately). Untick -> auto-remove.
+    async function toggleCritical(materialCode, materialName, isChecked, minQty) {
+        window.criticalSpareMap = window.criticalSpareMap || {};
+        try {
+            if (isChecked) {
+                const threshold = minQty && minQty > 0 ? minQty : 1;
+                const created = await API.createCriticalSpare({
+                    material_code: materialCode,
+                    machine_name: null,
+                    priority: 'critical',
+                    threshold_qty: threshold,
+                    remarks: 'Added from Material Master',
+                });
+                if (created && created.id) {
+                    window.criticalSpareMap[materialCode] = created.id;
+                }
+                showAlert(`${materialName} marked as Critical Spare`, 'success');
+            } else {
+                const spareId = window.criticalSpareMap[materialCode];
+                if (spareId) {
+                    await API.deleteCriticalSpare(spareId);
+                    delete window.criticalSpareMap[materialCode];
+                }
+                showAlert(`${materialName} removed from Critical Spares`, 'success');
+            }
+            loadMaterials(document.getElementById('searchInput').value);
+        } catch (err) {
+            showAlert('Could not update Critical Spare status: ' + (err && err.message ? err.message : 'Unknown error'), 'danger');
+            loadMaterials(document.getElementById('searchInput').value);
+        }
+    }
+
+    async function deleteMaterialRow(materialCode, materialName) {
+        if (!confirm(`Delete "${materialName}" (${materialCode})? If it has no purchase/issue history it will be permanently removed; otherwise it will be deactivated (hidden from the active list) to protect that history.`)) return;
+        const result = await API.deleteMaterial(materialCode);
+        if (result) {
+            showAlert(result.message || 'Done', 'success');
+            loadMaterials(document.getElementById('searchInput').value);
+        }
+    }
+
+    function renderRowEdit(materialCode) {
+        const row = document.getElementById(`matrow-${materialCode}`);
+        const mat = JSON.parse(row.dataset.material);
+        row.innerHTML = `
+            <td>${mat.material_code}</td>
+            <td>${mat.material_name}</td>
+            <td><input type="text" id="edit_cat_${materialCode}" value="${esc(mat.category)}" style="width:110px;"></td>
+            <td><input type="text" id="edit_grade_${materialCode}" value="${esc(mat.grade)}" style="width:90px;"></td>
+            <td>${mat.uom}</td>
+            <td><input type="number" step="0.01" id="edit_stock_${materialCode}" value="${mat.current_qty}" style="width:90px;"></td>
+            <td>${mat.min_qty}/${mat.max_qty}</td>
+            <td>-</td>
+            <td><span class="badge badge-success">${mat.status}</span></td>
+            <td style="white-space: nowrap;">
+                <button class="btn btn-sm btn-primary" title="Save" onclick="saveRowEdit('${materialCode}')">
+                    <i class="bi bi-check-lg"></i>
+                </button>
+                <button class="btn btn-sm btn-secondary" title="Cancel" onclick="cancelRowEdit('${materialCode}')">
+                    <i class="bi bi-x-lg"></i>
+                </button>
+            </td>
+        `;
+    }
+
+    function cancelRowEdit(materialCode) {
+        loadMaterials(document.getElementById('searchInput').value);
+    }
+
+    async function saveRowEdit(materialCode) {
+        const row = document.getElementById(`matrow-${materialCode}`);
+        const mat = JSON.parse(row.dataset.material);
+
+        const newCategory = document.getElementById(`edit_cat_${materialCode}`).value.trim();
+        const newGrade = document.getElementById(`edit_grade_${materialCode}`).value.trim();
+        const newStockRaw = document.getElementById(`edit_stock_${materialCode}`).value;
+        const newStock = newStockRaw === '' ? null : parseFloat(newStockRaw);
+
+        try {
+            // Category / Grade go through the normal material update.
+            if (newCategory !== (mat.category || '') || newGrade !== (mat.grade || '')) {
+                await API.updateMaterial(materialCode, { category: newCategory || null, grade: newGrade || null });
+            }
+            // Current stock is a real inventory movement, not a plain field edit --
+            // it goes through the audited quick-adjust endpoint (creates + auto-approves
+            // a stock reconciliation, same trusted path as Physical Count).
+            if (newStock !== null && newStock !== parseFloat(mat.current_qty)) {
+                await API.quickAdjustStock(materialCode, newStock, 'Edited from Material Master list');
+            }
+            showAlert('Material updated', 'success');
+        } catch (err) {
+            showAlert('Update failed: ' + (err && err.message ? err.message : 'Unknown error'), 'danger');
+        }
+        loadMaterials(document.getElementById('searchInput').value);
+    }
+
+    function searchMaterials() {
+        const search = document.getElementById('searchInput').value;
+        currentPage = 1;
+        loadMaterials(search);
+    }
+
+    function nextPage() {
+        currentPage++;
+        loadMaterials();
+    }
+
+    function previousPage() {
+        if (currentPage > 1) currentPage--;
+        loadMaterials();
+    }
+
+    async function importExcel() {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = '.xlsx,.csv';
+        input.onchange = async (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                try {
+                    const result = await API.importMaterials(file);
+                    const created = result && result.created != null ? result.created : 0;
+                    const updated = result && result.updated != null ? result.updated : 0;
+                    const warnCount = (result && result.errors && result.errors.length) || 0;
+                    let msg = `Import done: ${created} created, ${updated} updated`;
+                    if (warnCount) msg += `, ${warnCount} warning(s) -- check console`;
+                    showAlert(msg, warnCount ? 'warning' : 'success');
+                    if (warnCount) console.warn('Import warnings:', result.errors);
+                    loadMaterials();
+                } catch (err) {
+                    showAlert('Import failed: ' + (err && err.message ? err.message : 'Unknown error'), 'danger');
+                }
+            }
+        };
+        input.click();
+    }
+
+    async function exportExcel() {
+        const blob = await API.exportMaterials('excel');
+        if (blob) {
+            downloadFile(blob, 'materials.xlsx');
+            showAlert('Export started', 'success');
+        }
+    }
+</script>
+{% endblock %}

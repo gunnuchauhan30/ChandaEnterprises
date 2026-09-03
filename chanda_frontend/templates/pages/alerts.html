@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}Alerts - Chanda Enterprises{% endblock %}
+{% block page_title %}Stock Alerts{% endblock %}
+
+{% block content %}
+<div class="container-fluid" style="max-width: 1400px; margin: 0 auto;">
+    <div style="display: flex; gap: 10px; margin-bottom: 20px;">
+        <label style="display:flex; align-items:center; gap:8px; color: var(--text-lighter); font-size: 14px;">
+            <input type="checkbox" id="onlyOpen" checked onchange="loadAlerts()" style="width:auto;"> Show open alerts only
+        </label>
+    </div>
+
+    <div class="glass card-3d" style="padding: 24px; border-radius: 12px;">
+        <div class="table-container">
+            <table>
+                <thead>
+                    <tr><th>Material Code</th><th>Item Name</th><th>Type</th><th>Triggered</th><th>Status</th><th>Actions</th></tr>
+                </thead>
+                <tbody id="alertsBody">
+                    <tr><td colspan="6" style="text-align: center; padding: 30px; color: #999;">
+                        <div class="spinner"></div><div style="margin-top: 10px;">Loading alerts...</div>
+                    </td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<script>
+    document.addEventListener('DOMContentLoaded', () => loadAlerts());
+
+    async function loadAlerts() {
+        const onlyOpen = document.getElementById('onlyOpen').checked;
+        const response = await API.getAlerts(onlyOpen);
+        const tbody = document.getElementById('alertsBody');
+        tbody.innerHTML = '';
+        if (!response) return;
+
+        if (response.items && response.items.length > 0) {
+            response.items.forEach(a => {
+                const row = tbody.insertRow();
+                const typeColor = a.alert_type === 'low_stock' ? 'danger' : 'warning';
+                row.innerHTML = `
+                    <td>${a.material_code}</td>
+                    <td>${a.material_name || '-'}</td>
+                    <td><span class="badge badge-${typeColor}">${a.alert_type.replace('_', ' ')}</span></td>
+                    <td>${formatDateTime(a.triggered_at)}</td>
+                    <td><span class="badge badge-${a.is_resolved ? 'success' : 'warning'}">${a.is_resolved ? 'Resolved' : 'Open'}</span></td>
+                    <td>${!a.is_resolved ? `<button class="btn btn-sm btn-success" onclick="resolve(${a.id})">Resolve</button>` : '-'}</td>
+                `;
+            });
+        } else {
+            tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: #999;">No alerts found</td></tr>';
+        }
+    }
+
+    async function resolve(alertId) {
+        const result = await API.resolveAlert(alertId);
+        if (result) {
+            showAlert('Alert resolved', 'success');
+            loadAlerts();
+        }
+    }
+</script>
+{% endblock %}

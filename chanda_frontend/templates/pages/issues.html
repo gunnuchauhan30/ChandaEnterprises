@@ -1,0 +1,191 @@
+{% extends "base.html" %}
+{% block title %}Issues - Chanda Enterprises{% endblock %}
+{% block page_title %}Material Issues (Route Card){% endblock %}
+
+{% block content %}
+<div class="container-fluid" style="max-width: 1400px; margin: 0 auto;">
+    <div style="display: flex; justify-content: flex-end; margin-bottom: 20px;">
+        <a href="/issues/new" class="btn btn-primary"><i class="bi bi-plus"></i> New Direct Issue</a>
+    </div>
+
+    <div class="glass card-3d" style="padding: 24px; border-radius: 12px;">
+        <div class="table-container">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Issue No</th><th>Material</th><th>Job Card</th><th>Department</th>
+                        <th>Issued Qty</th><th>Consumed</th><th>Status</th><th>Date</th><th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="issuesBody">
+                    <tr><td colspan="9" style="text-align: center; padding: 30px; color: #999;">
+                        <div class="spinner"></div><div style="margin-top: 10px;">Loading issues...</div>
+                    </td></tr>
+                </tbody>
+            </table>
+        </div>
+        <div style="display: flex; justify-content: center; align-items: center; gap: 10px; margin-top: 20px;">
+            <button onclick="previousPage()" class="btn btn-secondary btn-sm">← Previous</button>
+            <span id="pageInfo" style="color: var(--text-lighter);">Page 1</span>
+            <button onclick="nextPage()" id="nextBtn" class="btn btn-secondary btn-sm">Next →</button>
+        </div>
+    </div>
+</div>
+
+<!-- Update Consumption Modal -->
+<div class="modal" id="consumptionModal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h2>Update Consumption</h2>
+            <button class="close-btn" onclick="closeConsumptionModal()">&times;</button>
+        </div>
+        <form id="consumptionForm" onsubmit="submitConsumption(event)">
+            <input type="hidden" id="consumptionIssueId">
+
+            <!-- FIFO Supplier Breakdown -- loads as soon as the modal opens,
+                 before the user fills in consumed qty -->
+            <div id="consumptionFifoBox" style="background: var(--glass-dark); padding: 14px; border-radius: 8px; margin-bottom: 16px; border-left: 4px solid #f59e0b;">
+                <div style="font-weight:bold; color:#f59e0b; margin-bottom:6px;">📦 FIFO Supplier Breakdown</div>
+                <div id="consumptionFifoContent" style="font-size:13px; color: var(--text-lighter);">
+                    <div class="spinner"></div> Loading source batch...
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label>Consumed Quantity (of <span id="consumptionMaxQty">-</span> issued)</label>
+                <input type="number" id="consumedQty" step="0.01" min="0" required>
+            </div>
+            <div style="display:flex; gap:10px; justify-content:flex-end; margin-top: 16px;">
+                <button type="button" class="btn btn-secondary" onclick="closeConsumptionModal()">Cancel</button>
+                <button type="submit" class="btn btn-primary">Save</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+    let currentPage = 1;
+    const pageSize = 20;
+
+    document.addEventListener('DOMContentLoaded', () => loadIssues());
+
+    async function loadIssues() {
+        const response = await API.getIssues(currentPage, pageSize);
+        const tbody = document.getElementById('issuesBody');
+        tbody.innerHTML = '';
+        if (!response) return;
+
+        // Raw completion_status values ('issued'/'partial'/'completed') stay
+        // as-is in the DB/API for compatibility -- this only controls what
+        // label the badge displays.
+        const statusLabel = (status) => status === 'issued' ? 'Approved'
+            : status === 'partial' ? 'Partial'
+            : status === 'completed' ? 'Completed'
+            : status;
+
+        if (response.items && response.items.length > 0) {
+            response.items.forEach(i => {
+                const row = tbody.insertRow();
+                const color = i.completion_status === 'completed' ? 'success' : i.completion_status === 'partial' ? 'warning' : 'info';
+                row.innerHTML = `
+                    <td>${i.issue_no}</td>
+                    <td>${i.material_code}${i.material_name ? '<br><span style="color:var(--text-lighter); font-size:11px;">' + i.material_name + '</span>' : ''}</td>
+                    <td>${i.job_card_no || '-'}</td>
+                    <td>${i.department || '-'}</td>
+                    <td>${i.issue_qty}</td>
+                    <td>${i.consumed_qty ?? '-'}</td>
+                    <td><span class="badge badge-${color}">${statusLabel(i.completion_status)}</span></td>
+                    <td>${formatDate(i.issue_date)}</td>
+                    <td>
+                        ${i.completion_status !== 'completed' ? `<button class="btn btn-sm btn-secondary" onclick="updateConsumption(${i.id}, ${i.issue_qty})" title="Update consumption"><i class="bi bi-pencil"></i></button>` : ''}
+                    </td>
+                `;
+            });
+            document.getElementById('pageInfo').textContent = `Page ${currentPage}`;
+            document.getElementById('nextBtn').disabled = response.items.length < pageSize;
+        } else {
+            tbody.innerHTML = '<tr><td colspan="9" style="text-align: center; color: #999;">No issues found</td></tr>';
+        }
+    }
+
+    function nextPage() { currentPage++; loadIssues(); }
+    function previousPage() { if (currentPage > 1) currentPage--; loadIssues(); }
+
+    function updateConsumption(id, issueQty) {
+        document.getElementById('consumptionIssueId').value = id;
+        document.getElementById('consumptionMaxQty').textContent = issueQty;
+        document.getElementById('consumedQty').max = issueQty;
+        document.getElementById('consumedQty').value = '';
+
+        // Open the modal first, then load the FIFO Supplier Breakdown into
+        // it -- so it's visible as soon as Action opens, before the user
+        // fills in the consumed qty.
+        document.getElementById('consumptionModal').classList.add('active');
+        loadConsumptionFifoSource(id);
+    }
+
+    async function loadConsumptionFifoSource(issueId) {
+        const box = document.getElementById('consumptionFifoContent');
+        box.innerHTML = '<div class="spinner"></div> Loading source batch...';
+
+        try {
+            const source = await API.getIssueFifoSource(issueId);
+            if (!source || !source.allocation || !source.allocation.length) {
+                box.innerHTML = 'No batch recorded for this issue (it was issued before this material had any stock_batches on record).';
+                return;
+            }
+            // Exact same numbered-circle flow card as /issues/fifo-preview
+            // (New Issue -> Confirm & Create Issue screen), so both places
+            // look and read identically.
+            box.innerHTML = source.allocation.map((item, idx) => {
+                const isLast = idx === source.allocation.length - 1;
+                return `
+                <div style="display:flex; align-items:stretch; gap:12px; margin-bottom: ${isLast ? '0' : '10px'};">
+                    <div style="width:30px; display:flex; flex-direction:column; align-items:center;">
+                        <div style="width:26px; height:26px; border-radius:50%; background:rgba(74,222,128,0.15); border:2px solid #4ade80; display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:bold; color:#4ade80;">${idx + 1}</div>
+                        ${isLast ? '' : `<div style="flex:1; width:2px; background:var(--glass-medium); margin:2px 0;"></div>`}
+                    </div>
+                    <div style="flex:1; background: var(--glass-medium); border-radius:10px; padding:14px 16px; border:1px solid rgba(74,222,128,0.35);">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; flex-wrap:wrap; gap:6px;">
+                            <div style="font-weight:bold; color:#fff; font-size:15px;">🏭 ${item.supplier_name}</div>
+                            <div style="font-size:12px; color:#999;">📅 ${item.received_date || '-'} · Batch ${item.batch_no}${idx === 0 ? ' <span style="color:#f59e0b;">(oldest — issued first)</span>' : ''}</div>
+                        </div>
+                        <div style="display:flex; align-items:center; gap:10px; font-size:14px; flex-wrap:wrap;">
+                            <span style="color:#93c5fd;">Available <b>${item.available}</b></span>
+                            <span style="color:#666;">→</span>
+                            <span style="color:#4ade80; font-weight:bold;">Issued ${item.issue_qty}</span>
+                            <span style="color:#666;">→</span>
+                            <span style="color:#f59e0b;">Remaining now <b>${item.remaining_after}</b></span>
+                        </div>
+                    </div>
+                </div>`;
+            }).join('');
+        } catch (err) {
+            console.error('FIFO source load failed:', err);
+            box.innerHTML = `<span style="color:#f87171;">Could not load source batch (${err.message || 'error'}).</span>`;
+        }
+    }
+
+    function closeConsumptionModal() {
+        document.getElementById('consumptionModal').classList.remove('active');
+    }
+
+    async function submitConsumption(event) {
+        event.preventDefault();
+        const id = document.getElementById('consumptionIssueId').value;
+        const issueQty = parseFloat(document.getElementById('consumedQty').max);
+        const qty = parseFloat(document.getElementById('consumedQty').value);
+        if (isNaN(qty) || qty < 0 || qty > issueQty) {
+            showAlert('Invalid quantity', 'danger');
+            return;
+        }
+        const status = qty >= issueQty ? 'completed' : 'partial';
+        const result = await API.updateIssueConsumption(id, qty, status);
+        if (result) {
+            showAlert('Consumption updated', 'success');
+            closeConsumptionModal();
+            loadIssues();
+        }
+    }
+</script>
+{% endblock %}

@@ -1,0 +1,463 @@
+{% extends "base.html" %}
+{% block title %}Inventory - Chanda Enterprises{% endblock %}
+{% block page_title %}Inventory Overview{% endblock %}
+
+{% block content %}
+<div class="container-fluid" style="max-width: 1400px; margin: 0 auto;">
+    <div style="display: flex; gap: 10px; margin-bottom: 20px;">
+        <button class="btn btn-secondary btn-sm" onclick="showTab('summary')" id="tabSummaryBtn">Summary</button>
+        <button class="btn btn-secondary btn-sm" onclick="showTab('valuation')" id="tabValuationBtn">Valuation</button>
+        <button class="btn btn-secondary btn-sm" onclick="showTab('aging')" id="tabAgingBtn">Aging</button>
+        <button class="btn btn-secondary btn-sm" onclick="showTab('reconciliation')" id="tabReconciliationBtn">Physical Reconciliation</button>
+        <button class="btn btn-secondary btn-sm" onclick="showTab('syncCheck')" id="tabSyncCheckBtn">Batch Sync Check</button>
+    </div>
+
+    <div class="glass card-3d" style="padding: 24px; border-radius: 12px;">
+        <div id="summaryTab" class="table-container">
+            <div style="margin-bottom: 16px;">
+                <input type="text" id="inventorySearchInput" placeholder="Search by code, name or location..."
+                       oninput="filterInventorySummary()"
+                       style="padding: 10px 14px; background: var(--glass-dark); border: 1px solid var(--glass-medium); border-radius: 8px; color: var(--text-light); width: 320px;">
+            </div>
+            <table>
+                <thead><tr><th>Code</th><th>Name</th><th>Opening</th><th>Current</th><th>Reserved</th><th>Available</th><th>Location</th></tr></thead>
+                <tbody id="summaryBody"><tr><td colspan="7" style="text-align:center; padding:20px; color:#999;"><div class="spinner"></div></td></tr></tbody>
+            </table>
+        </div>
+        <div id="valuationTab" class="table-container" style="display:none;">
+            <table>
+                <thead><tr id="valuationHead"></tr></thead>
+                <tbody id="valuationBody"></tbody>
+            </table>
+        </div>
+        <div id="agingTab" class="table-container" style="display:none;">
+            <table>
+                <thead><tr id="agingHead"></tr></thead>
+                <tbody id="agingBody"></tbody>
+            </table>
+        </div>
+        <div id="reconciliationTab" style="display:none;">
+            <div style="display:flex; justify-content: space-between; align-items:center; margin-bottom: 20px; flex-wrap: wrap; gap: 10px;">
+                <div style="display:flex; gap:10px;">
+                    <select id="recoStatusFilter" onchange="loadReconciliations()" style="padding: 10px 14px; background: var(--glass-dark); border: 1px solid var(--glass-medium); border-radius: 8px; color: var(--text-light);">
+                        <option value="pending">Pending</option>
+                        <option value="approved">Approved</option>
+                        <option value="rejected">Rejected</option>
+                        <option value="">All</option>
+                    </select>
+                </div>
+                <button onclick="openReconciliationModal()" class="btn btn-primary"><i class="bi bi-clipboard-check"></i> Enter Physical Count</button>
+            </div>
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Material</th><th>System Qty</th><th>Physical Qty</th><th>Difference</th>
+                            <th>Remarks</th><th>Status</th><th>Counted By</th><th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="reconciliationBody"><tr><td colspan="8" style="text-align:center; padding:20px; color:#999;">Loading...</td></tr></tbody>
+                </table>
+            </div>
+        </div>
+        <div id="syncCheckTab" style="display:none;">
+            <div style="background: rgba(59,130,246,0.1); border-left: 4px solid var(--info); padding: 12px; border-radius: 8px; margin-bottom: 16px; font-size: 13px; color: #93c5fd;">
+                Compares each material's <b>current_qty</b> (the master running total) against the
+                <b>sum of its stock_batches.remaining_qty</b> (what the FIFO supplier breakdown is built from).
+                These should always match -- this list shows where they don't. Read-only: nothing here changes stock.
+            </div>
+            <div style="display:flex; justify-content: space-between; align-items:center; margin-bottom: 16px; flex-wrap: wrap; gap: 10px;">
+                <div id="syncCheckSummary" style="color: var(--text-lighter); font-size: 14px;"></div>
+                <div style="display:flex; gap:10px;">
+                    <button onclick="runFixGhostStock()" id="fixGhostStockBtn" class="btn btn-secondary btn-sm" style="display:none;"><i class="bi bi-magic"></i> Auto-Fix Ghost Stock</button>
+                    <button onclick="runFixPhantomBatches()" id="fixPhantomBtn" class="btn btn-secondary btn-sm" style="display:none;"><i class="bi bi-scissors"></i> Trim Phantom Batches</button>
+                    <button onclick="runUndoGhostStockFix()" id="undoGhostStockBtn" class="btn btn-secondary btn-sm" style="display:none; color:#f87171;"><i class="bi bi-arrow-counterclockwise"></i> Undo Auto-Fix</button>
+                    <button onclick="loadSyncCheck()" class="btn btn-primary btn-sm"><i class="bi bi-arrow-clockwise"></i> Run Check</button>
+                </div>
+            </div>
+            <div style="font-size:12px; color:#999; margin-bottom:10px;">
+                🟠 Auto-fixable: adds a catch-up batch (current_qty ahead of batches)
+                &nbsp;·&nbsp; 🔴 Auto-fixable: trims oldest batches to match (batches ahead of current_qty)
+            </div>
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Material</th><th>current_qty</th><th>SUM(batches)</th><th>Difference</th>
+                        </tr>
+                    </thead>
+                    <tbody id="syncCheckBody"><tr><td colspan="4" style="text-align:center; padding:20px; color:#999;">Click "Run Check" to scan all materials.</td></tr></tbody>
+                </table>
+
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Physical Count Entry Modal -->
+<div class="modal" id="reconciliationModal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h2>Enter Physical Stock Count</h2>
+            <button class="close-btn" onclick="closeReconciliationModal()">&times;</button>
+        </div>
+        <form id="reconciliationForm" onsubmit="submitReconciliation(event)">
+            <div class="form-group">
+                <label>Material Code</label>
+                <input type="text" id="recoMaterialCode" required placeholder="Start typing to search..." autocomplete="off">
+                <div id="recoMaterialSuggestions" style="background: var(--glass-dark); border-radius: 8px; margin-top: 4px; max-height: 160px; overflow-y: auto;"></div>
+                <div id="recoSystemQtyHint" style="font-size: 12px; color: var(--text-lighter); margin-top: 6px;"></div>
+            </div>
+            <div class="form-group">
+                <label>Physical Count (actual counted quantity)</label>
+                <input type="number" id="recoPhysicalQty" step="0.01" required>
+            </div>
+            <div class="form-group">
+                <label>Remarks</label>
+                <textarea id="recoRemarks" placeholder="e.g. Reason for mismatch, if known"></textarea>
+            </div>
+            <div style="background: rgba(59,130,246,0.1); border-left: 4px solid var(--info); padding: 12px; border-radius: 8px; margin-bottom: 20px; font-size: 13px; color: #93c5fd;">
+                This will NOT change stock immediately. It goes to Admin for approval;
+                only once approved does the system quantity get adjusted (as a tracked ADJUSTMENT entry).
+            </div>
+            <div style="display:flex; gap:10px; justify-content:flex-end;">
+                <button type="button" class="btn btn-secondary" onclick="closeReconciliationModal()">Cancel</button>
+                <button type="submit" class="btn btn-primary">Submit for Approval</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+
+<script>
+    document.addEventListener('DOMContentLoaded', () => loadSummary());
+
+    let inventorySummaryRows = [];
+
+    async function loadSummary() {
+        const data = await API.getInventorySummary();
+        inventorySummaryRows = (data && data.items) ? data.items : [];
+        renderInventorySummary(inventorySummaryRows);
+    }
+
+    function renderInventorySummary(rows) {
+        const tbody = document.getElementById('summaryBody');
+        tbody.innerHTML = '';
+        if (!rows || !rows.length) {
+            tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; color:#999;">No materials found</td></tr>';
+            return;
+        }
+
+        // Each row IS one material, already carrying its own FIFO supplier
+        // breakdown from the backend (`suppliers`: oldest batch first). No
+        // client-side grouping needed -- the material's own opening/current/
+        // reserved/available fields are the authoritative TOTAL.
+        rows.forEach(material => {
+            const suppliers = material.suppliers || [];
+
+            // Main material row (bold, acts as the TOTAL row)
+            const mainRow = tbody.insertRow();
+            mainRow.style.backgroundColor = 'var(--glass-medium)';
+            mainRow.style.fontWeight = 'bold';
+            mainRow.innerHTML = `
+                <td>${material.material_code}${suppliers.length > 1 ? ` <span style="font-weight:normal; font-size:11px; color:#999;">(${suppliers.length} suppliers)</span>` : ''}</td>
+                <td>${material.material_name}</td>
+                <td>${material.opening_qty ?? 0}</td>
+                <td>${material.current_qty ?? 0}</td>
+                <td>${material.reserved_qty ?? 0}</td>
+                <td>${material.available_qty ?? 0}</td>
+                <td>${[material.warehouse, material.rack, material.bin].filter(Boolean).join(' / ') || '-'}</td>
+            `;
+
+            // Supplier sub-rows (indented, oldest batch first — FIFO order)
+            // Just the supplier name + since-date on this line -- the
+            // Current/Available qty numbers live on the material's own
+            // TOTAL row above (and the explicit TOTAL row below, when there
+            // are 2+ suppliers), so they're not repeated here.
+            suppliers.forEach(supplier => {
+                const supRow = tbody.insertRow();
+                supRow.style.fontSize = '13px';
+                supRow.innerHTML = `
+                    <td style="padding-left: 26px; color: #ccc;">└─ 🏭 ${supplier.supplier_name}</td>
+                    <td style="color: #999;"><small>${supplier.oldest_date ? 'since ' + supplier.oldest_date : ''}</small></td>
+                    <td></td>
+                    <td></td>
+                    <td></td>
+                    <td></td>
+                    <td></td>
+                `;
+            });
+
+            // Explicit TOTAL row under the supplier breakdown when there is
+            // more than one supplier, so the FIFO split is visibly summed.
+            if (suppliers.length > 1) {
+                const totalRow = tbody.insertRow();
+                totalRow.style.fontSize = '13px';
+                totalRow.style.borderTop = '1px dashed var(--glass-medium)';
+                totalRow.innerHTML = `
+                    <td style="padding-left: 26px; color: #fff; font-weight:600;">└─ TOTAL</td>
+                    <td></td>
+                    <td></td>
+                    <td style="color:#fff; font-weight:600;">${material.current_qty ?? 0}</td>
+                    <td></td>
+                    <td style="color:#fff; font-weight:600;">${material.available_qty ?? 0}</td>
+                    <td></td>
+                `;
+            }
+        });
+    }
+
+    function filterInventorySummary() {
+        const q = document.getElementById('inventorySearchInput').value.trim().toLowerCase();
+        if (!q) { renderInventorySummary(inventorySummaryRows); return; }
+        const filtered = inventorySummaryRows.filter(m => {
+            const loc = [m.warehouse, m.rack, m.bin].filter(Boolean).join(' / ').toLowerCase();
+            return (m.material_code || '').toLowerCase().includes(q)
+                || (m.material_name || '').toLowerCase().includes(q)
+                || loc.includes(q);
+        });
+        renderInventorySummary(filtered);
+    }
+
+    // Valuation/aging come from DB views with dynamic columns, so render generically.
+    async function loadGeneric(getter, headEl, bodyEl) {
+        const data = await getter();
+        const rows = (data && data.items) ? data.items : [];
+        const head = document.getElementById(headEl);
+        const body = document.getElementById(bodyEl);
+        head.innerHTML = ''; body.innerHTML = '';
+        if (!rows.length) {
+            body.innerHTML = '<tr><td style="text-align:center; color:#999; padding:20px;">No data</td></tr>';
+            return;
+        }
+        const cols = Object.keys(rows[0]);
+        head.innerHTML = cols.map(c => `<th>${c}</th>`).join('');
+        rows.forEach(row => {
+            const tr = document.createElement('tr');
+            tr.innerHTML = cols.map(c => `<td>${row[c] ?? '-'}</td>`).join('');
+            body.appendChild(tr);
+        });
+    }
+
+    let valuationLoaded = false, agingLoaded = false;
+
+    function showTab(tab) {
+        document.getElementById('summaryTab').style.display = tab === 'summary' ? 'block' : 'none';
+        document.getElementById('valuationTab').style.display = tab === 'valuation' ? 'block' : 'none';
+        document.getElementById('agingTab').style.display = tab === 'aging' ? 'block' : 'none';
+        document.getElementById('reconciliationTab').style.display = tab === 'reconciliation' ? 'block' : 'none';
+        document.getElementById('syncCheckTab').style.display = tab === 'syncCheck' ? 'block' : 'none';
+        if (tab === 'valuation' && !valuationLoaded) {
+            loadGeneric(API.getStockValuation.bind(API), 'valuationHead', 'valuationBody');
+            valuationLoaded = true;
+        }
+        if (tab === 'aging' && !agingLoaded) {
+            loadGeneric(API.getStockAging.bind(API), 'agingHead', 'agingBody');
+            agingLoaded = true;
+        }
+        if (tab === 'reconciliation') {
+            loadReconciliations();
+        }
+    }
+
+    // ============= BATCH SYNC CHECK (current_qty vs stock_batches) =============
+
+    async function loadSyncCheck() {
+        const body = document.getElementById('syncCheckBody');
+        const summary = document.getElementById('syncCheckSummary');
+        const fixBtn = document.getElementById('fixGhostStockBtn');
+        const trimBtn = document.getElementById('fixPhantomBtn');
+        body.innerHTML = '<tr><td colspan="4" style="text-align:center; padding:20px; color:#999;"><div class="spinner"></div></td></tr>';
+        summary.textContent = '';
+        fixBtn.style.display = 'none';
+        trimBtn.style.display = 'none';
+        if (currentUserRole() === 'admin') {
+            document.getElementById('undoGhostStockBtn').style.display = 'inline-flex';
+        }
+
+        const data = await API.getStockSyncCheck();
+        if (!data) {
+            body.innerHTML = '<tr><td colspan="4" style="text-align:center; padding:20px; color:#f87171;">Could not run check.</td></tr>';
+            return;
+        }
+
+        summary.innerHTML = `Checked <b>${data.checked_materials}</b> materials &mdash; <b style="color:${data.mismatched_count ? '#f87171' : '#4ade80'};">${data.mismatched_count}</b> mismatched`;
+
+        if (!data.mismatches.length) {
+            body.innerHTML = '<tr><td colspan="4" style="text-align:center; padding:20px; color:#4ade80;">✓ All materials in sync.</td></tr>';
+            return;
+        }
+
+        const addCount = data.mismatches.filter(r => r.fix_type === 'add_batch').length;
+        const trimCount = data.mismatches.filter(r => r.fix_type === 'trim_batch').length;
+        if (addCount > 0 && currentUserRole() === 'admin') {
+            fixBtn.style.display = 'inline-flex';
+            fixBtn.innerHTML = `<i class="bi bi-magic"></i> Auto-Fix Ghost Stock (${addCount})`;
+        }
+        if (trimCount > 0 && currentUserRole() === 'admin') {
+            trimBtn.style.display = 'inline-flex';
+            trimBtn.innerHTML = `<i class="bi bi-scissors"></i> Trim Phantom Batches (${trimCount})`;
+        }
+
+        body.innerHTML = data.mismatches.map(r => `
+            <tr style="border-left: 3px solid ${r.fix_type === 'add_batch' ? '#f59e0b' : '#f87171'};">
+                <td>${r.fix_type === 'add_batch' ? '🟠' : '🔴'} ${r.material_code}<br><span style="font-size:11px; color:#999;">${r.material_name}</span></td>
+                <td>${r.current_qty}</td>
+                <td>${r.batch_total_qty}</td>
+                <td style="color: ${r.difference > 0 ? '#f59e0b' : '#f87171'}; font-weight:bold;">
+                    ${r.difference > 0 ? '+' : ''}${r.difference}
+                </td>
+            </tr>
+        `).join('');
+    }
+
+    async function runFixGhostStock() {
+        if (!confirm('This will ADD a catch-up batch for every 🟠 auto-fixable material so its FIFO breakdown matches current_qty. current_qty itself will NOT change, and nothing will be removed or shrunk. Continue?')) return;
+
+        const btn = document.getElementById('fixGhostStockBtn');
+        btn.disabled = true;
+        const result = await API.fixGhostStock();
+        btn.disabled = false;
+
+        if (!result) {
+            showAlert('Auto-fix failed', 'danger');
+            return;
+        }
+        showAlert(`Added catch-up batches for ${result.fixed_count} materials`, 'success');
+        loadSyncCheck();
+    }
+
+    async function runUndoGhostStockFix() {
+        if (!confirm('This removes every "OPENING-<code>" catch-up batch added by Auto-Fix Ghost Stock (the "Direct / Unassigned" rows). current_qty is not touched -- materials go back to showing the mismatch until you decide how to fix them again. Continue?')) return;
+
+        const btn = document.getElementById('undoGhostStockBtn');
+        btn.disabled = true;
+        const result = await API.undoGhostStockFix();
+        btn.disabled = false;
+
+        if (!result) {
+            showAlert('Undo failed', 'danger');
+            return;
+        }
+        showAlert(`Removed ${result.removed_count} catch-up batches`, 'success');
+        loadSyncCheck();
+    }
+
+    async function runFixPhantomBatches() {
+        if (!confirm('This treats current_qty as correct and TRIMS remaining_qty on the OLDEST batches for every 🔴 material until SUM(batches) matches current_qty. current_qty itself will NOT change. This reduces existing batch quantities -- continue?')) return;
+
+        const btn = document.getElementById('fixPhantomBtn');
+        btn.disabled = true;
+        const result = await API.fixPhantomBatches();
+        btn.disabled = false;
+
+        if (!result) {
+            showAlert('Trim failed', 'danger');
+            return;
+        }
+        showAlert(`Trimmed phantom batch stock for ${result.fixed_count} materials`, 'success');
+        loadSyncCheck();
+    }
+
+    // ============= PHYSICAL STOCK RECONCILIATION =============
+
+    function currentUserRole() {
+        const user = JSON.parse(localStorage.getItem('user') || '{}');
+        return user.role || '';
+    }
+
+    async function loadReconciliations() {
+        const status = document.getElementById('recoStatusFilter').value;
+        const data = await API.getReconciliations(status);
+        const tbody = document.getElementById('reconciliationBody');
+        tbody.innerHTML = '';
+        const rows = (data && data.items) ? data.items : [];
+        const isAdmin = currentUserRole() === 'admin';
+
+        if (!rows.length) {
+            tbody.innerHTML = '<tr><td colspan="8" style="text-align:center; color:#999; padding:20px;">No reconciliation records</td></tr>';
+            return;
+        }
+
+        rows.forEach(r => {
+            const tr = tbody.insertRow();
+            const diffColor = r.difference_qty == 0 ? 'var(--text-lighter)' : (r.difference_qty > 0 ? '#f59e0b' : '#ef4444');
+            const statusBadge = { pending: 'badge-warning', approved: 'badge-success', rejected: 'badge-danger' }[r.status];
+            let actions = '-';
+            if (r.status === 'pending' && isAdmin) {
+                actions = `
+                    <button class="btn btn-sm btn-success" onclick="decideReco(${r.id}, 'approve')" title="Approve"><i class="bi bi-check-lg"></i></button>
+                    <button class="btn btn-sm btn-danger" onclick="decideReco(${r.id}, 'reject')" title="Reject"><i class="bi bi-x-lg"></i></button>
+                `;
+            } else if (r.status === 'pending') {
+                actions = '<span style="color:#999; font-size:12px;">Awaiting admin</span>';
+            }
+            tr.innerHTML = `
+                <td>${r.material_code}${r.material_name ? ' — ' + r.material_name : ''}</td>
+                <td>${r.system_qty}</td>
+                <td>${r.physical_qty}</td>
+                <td style="color:${diffColor}; font-weight:600;">${r.difference_qty > 0 ? '+' : ''}${r.difference_qty}</td>
+                <td>${r.remarks || '-'}</td>
+                <td><span class="badge ${statusBadge}">${r.status}</span></td>
+                <td>${r.counted_by || '-'}</td>
+                <td>${actions}</td>
+            `;
+        });
+    }
+
+    async function decideReco(id, action) {
+        const remarks = action === 'reject' ? (prompt('Reason for rejection (optional):') || '') : '';
+        const result = await API.decideReconciliation(id, action, remarks);
+        if (result) {
+            showAlert(`Reconciliation ${action}d`, 'success');
+            loadReconciliations();
+        }
+    }
+
+    function openReconciliationModal() {
+        document.getElementById('reconciliationForm').reset();
+        document.getElementById('recoMaterialSuggestions').innerHTML = '';
+        document.getElementById('recoSystemQtyHint').textContent = '';
+        document.getElementById('reconciliationModal').classList.add('active');
+    }
+
+    function closeReconciliationModal() {
+        document.getElementById('reconciliationModal').classList.remove('active');
+    }
+
+    document.getElementById('recoMaterialCode').addEventListener('input', async (e) => {
+        const q = e.target.value;
+        const box = document.getElementById('recoMaterialSuggestions');
+        if (!q) { box.innerHTML = ''; return; }
+        const res = await API.getMaterials(1, 8, q);
+        const items = (res && res.items) ? res.items : [];
+        box.innerHTML = items.map(m => `
+            <div class="glass-sm" style="padding:8px 12px; cursor:pointer; margin-bottom:4px;"
+                 onclick="selectRecoMaterial('${m.material_code}', ${m.current_qty})">
+                <strong>${m.material_code}</strong> — ${m.material_name} (current: ${m.current_qty})
+            </div>
+        `).join('') || '<div style="padding:8px 12px; color:#999;">No matches</div>';
+    });
+
+    function selectRecoMaterial(code, currentQty) {
+        document.getElementById('recoMaterialCode').value = code;
+        document.getElementById('recoSystemQtyHint').textContent = `Current system stock: ${currentQty}`;
+        document.getElementById('recoMaterialSuggestions').innerHTML = '';
+    }
+
+    async function submitReconciliation(e) {
+        e.preventDefault();
+        const payload = {
+            material_code: document.getElementById('recoMaterialCode').value,
+            physical_qty: parseFloat(document.getElementById('recoPhysicalQty').value),
+            remarks: document.getElementById('recoRemarks').value || null,
+        };
+        const result = await API.createReconciliation(payload);
+        if (result) {
+            showAlert('Physical count submitted for admin approval', 'success');
+            closeReconciliationModal();
+            loadReconciliations();
+        }
+    }
+</script>
+{% endblock %}

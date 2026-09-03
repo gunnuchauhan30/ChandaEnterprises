@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+{% block title %}New Return - Chanda Enterprises{% endblock %}
+{% block page_title %}New Return / Adjustment{% endblock %}
+
+{% block content %}
+<div class="container-fluid" style="max-width: 700px; margin: 0 auto;">
+    <div class="glass card-3d" style="padding: 30px; border-radius: 12px;">
+        <form id="returnForm">
+            <div class="form-group">
+                <label for="material_code">Material *</label>
+                <select id="material_code" required><option value="">-- Select material --</option></select>
+            </div>
+            <div class="form-group">
+                <label for="return_type">Return Type *</label>
+                <select id="return_type" onchange="toggleQtyField()">
+                    <option value="unused">Unused (returned to store)</option>
+                    <option value="vendor_return">Vendor Return</option>
+                    <option value="rejected">Rejected (QC)</option>
+                    <option value="adjustment">Stock Adjustment</option>
+                </select>
+            </div>
+            <div class="form-group" id="qtyGroup">
+                <label for="qty">Quantity *</label>
+                <input type="number" id="qty" step="0.01" min="0.01">
+            </div>
+            <div class="form-group" id="adjQtyGroup" style="display:none;">
+                <label for="adjustment_qty">Adjustment Qty (+/-) *</label>
+                <input type="number" id="adjustment_qty" step="0.01">
+            </div>
+            <div class="form-group" id="supplierGroup" style="display:none;">
+                <label for="supplier_id">Supplier</label>
+                <select id="supplier_id"><option value="">-- None --</option></select>
+            </div>
+            <div class="form-group">
+                <label for="returned_by_name">Return By (employee name)</label>
+                <input type="text" id="returned_by_name" placeholder="Who is physically returning this material?">
+            </div>
+            <div class="form-group">
+                <label for="reason">Reason</label>
+                <textarea id="reason"></textarea>
+            </div>
+            <div style="display: flex; gap: 12px;">
+                <button type="submit" class="btn btn-primary"><i class="bi bi-check-lg"></i> Record Return</button>
+                <a href="/returns" class="btn btn-secondary">Cancel</a>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+    document.addEventListener('DOMContentLoaded', async () => {
+        const materials = await API.getMaterials(1, 500);
+        const matSel = document.getElementById('material_code');
+        if (materials && materials.items) {
+            materials.items.forEach(m => {
+                const opt = document.createElement('option');
+                opt.value = m.material_code;
+                opt.textContent = `${m.material_code} - ${m.material_name}`;
+                matSel.appendChild(opt);
+            });
+        }
+        const suppliers = await API.getSuppliers(1, 200);
+        const supSel = document.getElementById('supplier_id');
+        if (suppliers && suppliers.items) {
+            suppliers.items.forEach(s => {
+                const opt = document.createElement('option');
+                opt.value = s.id;
+                opt.textContent = s.supplier_name;
+                supSel.appendChild(opt);
+            });
+        }
+        toggleQtyField();
+    });
+
+    function toggleQtyField() {
+        const type = document.getElementById('return_type').value;
+        document.getElementById('qtyGroup').style.display = type === 'adjustment' ? 'none' : 'block';
+        document.getElementById('adjQtyGroup').style.display = type === 'adjustment' ? 'block' : 'none';
+        document.getElementById('supplierGroup').style.display = type === 'vendor_return' ? 'block' : 'none';
+    }
+
+    document.getElementById('returnForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const type = document.getElementById('return_type').value;
+        const payload = {
+            material_code: document.getElementById('material_code').value,
+            return_type: type,
+            qty: type !== 'adjustment' ? parseFloat(document.getElementById('qty').value) : null,
+            adjustment_qty: type === 'adjustment' ? parseFloat(document.getElementById('adjustment_qty').value) : null,
+            supplier_id: type === 'vendor_return' ? (document.getElementById('supplier_id').value || null) : null,
+            returned_by_name: document.getElementById('returned_by_name').value || null,
+            reason: document.getElementById('reason').value || null,
+        };
+        const result = await API.createReturn(payload);
+        if (result) {
+            showAlert(`Return ${result.return_no} recorded`, 'success');
+            setTimeout(() => window.location.href = '/returns', 800);
+        }
+    });
+</script>
+{% endblock %}
