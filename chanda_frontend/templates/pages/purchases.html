@@ -22,11 +22,11 @@
                 <thead>
                     <tr>
                         <th>GRN No</th><th>Material</th><th>Supplier</th><th>Qty</th>
-                        <th>Unit Cost</th><th>Invoice No</th><th>QC Status</th><th>Date</th><th>Actions</th>
+                        <th>Unit Cost</th><th>Invoice No</th><th>QC Status</th><th>Accounts</th><th>Date</th><th>Actions</th>
                     </tr>
                 </thead>
                 <tbody id="purchasesBody">
-                    <tr><td colspan="9" style="text-align: center; padding: 30px; color: #999;">
+                    <tr><td colspan="10" style="text-align: center; padding: 30px; color: #999;">
                         <div class="spinner"></div><div style="margin-top: 10px;">Loading purchases...</div>
                     </td></tr>
                 </tbody>
@@ -59,8 +59,10 @@
             response.items.forEach(p => {
                 const row = tbody.insertRow();
                 const qcColor = p.qc_status === 'passed' ? 'success' : p.qc_status === 'failed' ? 'danger' : 'warning';
+                const acColor = p.accounts_approval_status === 'approved' ? 'success' : p.accounts_approval_status === 'rejected' ? 'danger' : 'warning';
                 const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
                 const canDoQC = currentUser.role === 'quality' || currentUser.role === 'admin';
+                const canDoAccounts = currentUser.role === 'accounts' || currentUser.role === 'admin';
                 row.innerHTML = `
                     <td>${p.grn_no}</td>
                     <td>${p.material_code}${p.material_name ? '<br><span style="color:var(--text-lighter); font-size:11px;">' + p.material_name + '</span>' : ''}</td>
@@ -69,19 +71,24 @@
                     <td>${formatCurrency(p.unit_cost)}</td>
                     <td>${p.invoice_no || '-'}</td>
                     <td><span class="badge badge-${qcColor}">${p.qc_status}</span></td>
+                    <td><span class="badge badge-${acColor}">${p.accounts_approval_status}</span></td>
                     <td>${formatDate(p.created_at)}</td>
                     <td>
                         ${(p.qc_status === 'pending' && canDoQC) ? `
                             <button class="btn btn-sm btn-success" onclick="setQC(${p.id}, 'passed')" title="Pass QC"><i class="bi bi-check-lg"></i></button>
                             <button class="btn btn-sm btn-danger" onclick="setQC(${p.id}, 'failed')" title="Fail QC"><i class="bi bi-x-lg"></i></button>
                         ` : (p.qc_status === 'pending' ? '<span style="color:#999; font-size:12px;">Awaiting Quality</span>' : '')}
+                        ${(p.qc_status === 'passed' && p.accounts_approval_status === 'pending' && canDoAccounts) ? `
+                            <button class="btn btn-sm btn-success" onclick="setAccounts(${p.id}, 'approved')" title="Accounts Approve"><i class="bi bi-check-lg"></i></button>
+                            <button class="btn btn-sm btn-danger" onclick="setAccounts(${p.id}, 'rejected')" title="Reject"><i class="bi bi-x-lg"></i></button>
+                        ` : (p.qc_status === 'passed' && p.accounts_approval_status === 'pending' ? '<span style="color:#999; font-size:12px;">Awaiting Accounts</span>' : '')}
                     </td>
                 `;
             });
             document.getElementById('pageInfo').textContent = `Page ${currentPage}`;
             document.getElementById('nextBtn').disabled = response.items.length < pageSize;
         } else {
-            tbody.innerHTML = '<tr><td colspan="9" style="text-align: center; color: #999;">No purchases found</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="10" style="text-align: center; color: #999;">No purchases found</td></tr>';
         }
     }
 
@@ -96,7 +103,19 @@
         }
         const result = await API.updateQCStatus(purchaseId, status, remarks);
         if (result) {
-            showAlert(`QC marked as ${status}. Stock updates automatically when passed.`, 'success');
+            showAlert(`QC marked as ${status}. Accounts approval is still needed before stock updates.`, 'success');
+            loadPurchases();
+        }
+    }
+
+    async function setAccounts(purchaseId, status) {
+        let remarks = '';
+        if (status === 'rejected') {
+            remarks = prompt('Reason for rejection (optional):') || '';
+        }
+        const result = await API.accountsApprovePurchase(purchaseId, status, remarks);
+        if (result) {
+            showAlert(status === 'approved' ? 'Approved -- stock updated.' : 'Rejected -- no stock change.', 'success');
             loadPurchases();
         }
     }
