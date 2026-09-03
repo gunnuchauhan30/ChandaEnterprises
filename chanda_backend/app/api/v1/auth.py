@@ -23,7 +23,7 @@ from app.core.limiter import limiter
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
 
-VALID_ROLES = {"admin", "store_manager", "purchase", "production", "management", "quality"}
+VALID_ROLES = {"admin", "store_manager", "purchase", "production", "management", "quality", "operation", "accounts"}
 # Public /auth/signup can only create these — "admin" is deliberately excluded.
 # Admin accounts are created only via seed_admin.py or by an existing admin.
 SIGNUP_ALLOWED_ROLES = VALID_ROLES - {"admin"}
