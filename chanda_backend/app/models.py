@@ -224,6 +224,12 @@ class Purchase(Base):
     received_by = Column(Integer, ForeignKey("users.id"))
     created_by = Column(Integer, ForeignKey("users.id"))
     created_at = Column(DateTime, server_default=func.now())
+    # Accounts is the final approval step -- stock only ever increases once
+    # this flips to 'approved' (see fn_trg_purchase_stock in schema.sql /
+    # migration 0004). QC passing no longer moves stock by itself.
+    accounts_approval_status = Column(String(20), nullable=False, default="pending")
+    accounts_approved_by = Column(Integer, ForeignKey("users.id"))
+    accounts_approved_at = Column(DateTime)
 
     __table_args__ = (CheckConstraint("qty > 0", name="chk_purchase_qty_positive"),)
 
