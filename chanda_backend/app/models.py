@@ -246,6 +246,10 @@ class EmployeeRequest(Base):
     material_code = Column(String(30), ForeignKey("materials.material_code"), nullable=False)
     requested_qty = Column(Numeric(12, 2), nullable=False)
     requested_by = Column(Integer, ForeignKey("users.id"), nullable=False)
+    # Mandatory: the actual person raising the request types their name here.
+    # requested_by already tracks WHO was logged in, but the floor wants the
+    # raiser's name captured explicitly on the request itself too.
+    raised_by_name = Column(String(120), nullable=False)
     department = Column(String(80))
     job_card_no = Column(String(50))
     part_number = Column(String(80))
