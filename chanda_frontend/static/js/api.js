@@ -249,6 +249,13 @@ class API {
         });
     }
 
+    static async accountsApprovePurchase(purchaseId, status, remarks = '') {
+        return this.request(`/purchases/${purchaseId}/accounts-approval`, {
+            method: 'PATCH',
+            body: { status, remarks },
+        });
+    }
+
     static async uploadInvoice(purchaseId, file) {
         const formData = new FormData();
         formData.append('file', file);
