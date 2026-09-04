@@ -508,6 +508,10 @@ class API {
         return this.request('/dashboard');
     }
 
+    static async getPendingApprovals() {
+        return this.request('/dashboard/pending-approvals');
+    }
+
     // ============= REPORTS =============
     static async getReport(reportType, dateFrom = null, dateTo = null) {
         const params = new URLSearchParams();
