@@ -151,3 +151,19 @@ class DashboardOut(BaseModel):
     purchase_trend: list
     issue_trend: list
     department_consumption: list
+
+
+class PendingApprovalItem(BaseModel):
+    """One row in the role-aware 'Pending Approvals' dashboard card. `kind`
+    tells the frontend which page/action this links to; `ref_id` is the
+    id to act on (purchase id, employee_request id, or issue id)."""
+    kind: str  # 'grn_qc' | 'grn_accounts' | 'request_operation' | 'issue_accounts'
+    ref_id: int
+    label: str
+    detail: str
+    created_at: datetime
+
+
+class PendingApprovalsOut(BaseModel):
+    role: str
+    items: list[PendingApprovalItem]
