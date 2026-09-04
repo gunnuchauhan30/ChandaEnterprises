@@ -5,7 +5,7 @@
 {% block content %}
 <div class="container-fluid" style="max-width: 1400px; margin: 0 auto;">
     <div style="display: flex; justify-content: flex-end; margin-bottom: 20px;">
-        <a href="/issues/new" class="btn btn-primary"><i class="bi bi-plus"></i> New Direct Issue</a>
+        <a href="/issues/new" class="btn btn-primary"><i class="bi bi-plus"></i> Create Issue From Request</a>
     </div>
 
     <div class="glass card-3d" style="padding: 24px; border-radius: 12px;">
@@ -14,11 +14,11 @@
                 <thead>
                     <tr>
                         <th>Issue No</th><th>Material</th><th>Job Card</th><th>Department</th>
-                        <th>Issued Qty</th><th>Consumed</th><th>Status</th><th>Date</th><th>Actions</th>
+                        <th>Issued Qty</th><th>Consumed</th><th>Status</th><th>Accounts</th><th>Date</th><th>Actions</th>
                     </tr>
                 </thead>
                 <tbody id="issuesBody">
-                    <tr><td colspan="9" style="text-align: center; padding: 30px; color: #999;">
+                    <tr><td colspan="10" style="text-align: center; padding: 30px; color: #999;">
                         <div class="spinner"></div><div style="margin-top: 10px;">Loading issues...</div>
                     </td></tr>
                 </tbody>
@@ -84,9 +84,12 @@
             : status;
 
         if (response.items && response.items.length > 0) {
+            const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
+            const canDoAccounts = currentUser.role === 'accounts' || currentUser.role === 'admin';
             response.items.forEach(i => {
                 const row = tbody.insertRow();
                 const color = i.completion_status === 'completed' ? 'success' : i.completion_status === 'partial' ? 'warning' : 'info';
+                const acColor = i.accounts_approval_status === 'approved' ? 'success' : i.accounts_approval_status === 'rejected' ? 'danger' : 'warning';
                 row.innerHTML = `
                     <td>${i.issue_no}</td>
                     <td>${i.material_code}${i.material_name ? '<br><span style="color:var(--text-lighter); font-size:11px;">' + i.material_name + '</span>' : ''}</td>
@@ -95,21 +98,36 @@
                     <td>${i.issue_qty}</td>
                     <td>${i.consumed_qty ?? '-'}</td>
                     <td><span class="badge badge-${color}">${statusLabel(i.completion_status)}</span></td>
+                    <td><span class="badge badge-${acColor}">${i.accounts_approval_status}</span></td>
                     <td>${formatDate(i.issue_date)}</td>
                     <td>
-                        ${i.completion_status !== 'completed' ? `<button class="btn btn-sm btn-secondary" onclick="updateConsumption(${i.id}, ${i.issue_qty})" title="Update consumption"><i class="bi bi-pencil"></i></button>` : ''}
+                        ${(i.accounts_approval_status === 'pending' && canDoAccounts) ? `
+                            <button class="btn btn-sm btn-success" onclick="setAccounts(${i.id}, 'approved')" title="Accounts Approve (moves stock)"><i class="bi bi-check-lg"></i></button>
+                            <button class="btn btn-sm btn-danger" onclick="setAccounts(${i.id}, 'rejected')" title="Reject"><i class="bi bi-x-lg"></i></button>
+                        ` : (i.accounts_approval_status === 'pending' ? '<span style="color:#999; font-size:12px;">Awaiting Accounts</span>' : '')}
+                        ${(i.accounts_approval_status === 'approved' && i.completion_status !== 'completed') ? `<button class="btn btn-sm btn-secondary" onclick="updateConsumption(${i.id}, ${i.issue_qty})" title="Update consumption"><i class="bi bi-pencil"></i></button>` : ''}
                     </td>
                 `;
             });
             document.getElementById('pageInfo').textContent = `Page ${currentPage}`;
             document.getElementById('nextBtn').disabled = response.items.length < pageSize;
         } else {
-            tbody.innerHTML = '<tr><td colspan="9" style="text-align: center; color: #999;">No issues found</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="10" style="text-align: center; color: #999;">No issues found</td></tr>';
         }
     }
 
     function nextPage() { currentPage++; loadIssues(); }
     function previousPage() { if (currentPage > 1) currentPage--; loadIssues(); }
+
+    async function setAccounts(id, status) {
+        let remarks = '';
+        if (status === 'rejected') remarks = prompt('Reason for rejection (optional):') || '';
+        const result = await API.issueAccountsApproval(id, status, remarks);
+        if (result) {
+            showAlert(status === 'approved' ? 'Approved -- stock updated.' : 'Rejected -- no stock change.', 'success');
+            loadIssues();
+        }
+    }
 
     function updateConsumption(id, issueQty) {
         document.getElementById('consumptionIssueId').value = id;
