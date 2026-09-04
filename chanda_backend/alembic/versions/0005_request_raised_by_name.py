@@ -23,8 +23,9 @@ depends_on = None
 
 
 def upgrade() -> None:
-    # Add nullable first so existing rows don't break the migration...
-    op.add_column("employee_requests", sa.Column("raised_by_name", sa.String(120), nullable=True))
+    # IF NOT EXISTS: safe to re-run regardless of any partially-applied
+    # earlier attempt.
+    op.execute("ALTER TABLE employee_requests ADD COLUMN IF NOT EXISTS raised_by_name VARCHAR(120)")
 
     # ...backfill every existing row from the requester's own user record...
     op.execute("""
@@ -42,7 +43,7 @@ def upgrade() -> None:
     """)
 
     # ...now it's safe to enforce NOT NULL for every future row.
-    op.alter_column("employee_requests", "raised_by_name", nullable=False)
+    op.execute("ALTER TABLE employee_requests ALTER COLUMN raised_by_name SET NOT NULL")
 
 
 def downgrade() -> None:
