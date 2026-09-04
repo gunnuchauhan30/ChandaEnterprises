@@ -37,55 +37,55 @@
             </a>
 
             <!-- Materials -->
-            <div style="padding: 12px 16px; color: #999; font-size: 12px; text-transform: uppercase; margin-top: 20px; letter-spacing: 1px;">
+            <div id="navGroupInventory" style="padding: 12px 16px; color: #999; font-size: 12px; text-transform: uppercase; margin-top: 20px; letter-spacing: 1px;">
                 Inventory
             </div>
-            <a href="{{ url_for('materials') }}" class="nav-item {% if request.endpoint == 'materials' %}active{% endif %}">
+            <a href="{{ url_for('materials') }}" id="navMaterials" class="nav-item {% if request.endpoint == 'materials' %}active{% endif %}">
                 <i class="bi bi-box"></i> <span>Materials</span>
             </a>
-            <a href="{{ url_for('suppliers') }}" class="nav-item {% if request.endpoint == 'suppliers' %}active{% endif %}">
+            <a href="{{ url_for('suppliers') }}" id="navSuppliers" class="nav-item {% if request.endpoint == 'suppliers' %}active{% endif %}">
                 <i class="bi bi-building"></i> <span>Suppliers</span>
             </a>
-            <a href="{{ url_for('inventory') }}" class="nav-item {% if request.endpoint == 'inventory' %}active{% endif %}">
+            <a href="{{ url_for('inventory') }}" id="navInventory" class="nav-item {% if request.endpoint == 'inventory' %}active{% endif %}">
                 <i class="bi bi-archive"></i> <span>Inventory</span>
             </a>
-            <a href="{{ url_for('critical_spares') }}" class="nav-item {% if request.endpoint == 'critical_spares' %}active{% endif %}">
+            <a href="{{ url_for('critical_spares') }}" id="navCriticalSpares" class="nav-item {% if request.endpoint == 'critical_spares' %}active{% endif %}">
                 <i class="bi bi-cone-striped"></i> <span>Critical Spares</span>
             </a>
 
             <!-- Purchasing -->
-            <div style="padding: 12px 16px; color: #999; font-size: 12px; text-transform: uppercase; margin-top: 20px; letter-spacing: 1px;">
+            <div id="navGroupPurchasing" style="padding: 12px 16px; color: #999; font-size: 12px; text-transform: uppercase; margin-top: 20px; letter-spacing: 1px;">
                 Purchasing
             </div>
-            <a href="{{ url_for('purchases') }}" class="nav-item {% if request.endpoint == 'purchases' %}active{% endif %}">
+            <a href="{{ url_for('purchases') }}" id="navPurchases" class="nav-item {% if request.endpoint == 'purchases' %}active{% endif %}">
                 <i class="bi bi-receipt"></i> <span>Purchase/GRN</span>
             </a>
 
             <!-- Operations -->
-            <div style="padding: 12px 16px; color: #999; font-size: 12px; text-transform: uppercase; margin-top: 20px; letter-spacing: 1px;">
+            <div id="navGroupOperations" style="padding: 12px 16px; color: #999; font-size: 12px; text-transform: uppercase; margin-top: 20px; letter-spacing: 1px;">
                 Operations
             </div>
-            <a href="{{ url_for('requests') }}" class="nav-item {% if request.endpoint == 'requests' %}active{% endif %}">
+            <a href="{{ url_for('requests') }}" id="navRequests" class="nav-item {% if request.endpoint == 'requests' %}active{% endif %}">
                 <i class="bi bi-chat-square-dots"></i> <span>Requests</span>
             </a>
-            <a href="{{ url_for('issues') }}" class="nav-item {% if request.endpoint == 'issues' %}active{% endif %}">
+            <a href="{{ url_for('issues') }}" id="navIssues" class="nav-item {% if request.endpoint == 'issues' %}active{% endif %}">
                 <i class="bi bi-arrow-up-left"></i> <span>Issues</span>
             </a>
-            <a href="{{ url_for('route_card') }}" class="nav-item {% if request.endpoint == 'route_card' %}active{% endif %}">
+            <a href="{{ url_for('route_card') }}" id="navRouteCard" class="nav-item {% if request.endpoint == 'route_card' %}active{% endif %}">
                 <i class="bi bi-card-list"></i> <span>Route Card</span>
             </a>
-            <a href="{{ url_for('returns') }}" class="nav-item {% if request.endpoint == 'returns' %}active{% endif %}">
+            <a href="{{ url_for('returns') }}" id="navReturns" class="nav-item {% if request.endpoint == 'returns' %}active{% endif %}">
                 <i class="bi bi-arrow-down-right"></i> <span>Returns</span>
             </a>
 
             <!-- Reporting -->
-            <div style="padding: 12px 16px; color: #999; font-size: 12px; text-transform: uppercase; margin-top: 20px; letter-spacing: 1px;">
+            <div id="navGroupReporting" style="padding: 12px 16px; color: #999; font-size: 12px; text-transform: uppercase; margin-top: 20px; letter-spacing: 1px;">
                 Reporting
             </div>
-            <a href="{{ url_for('reports') }}" class="nav-item {% if request.endpoint == 'reports' %}active{% endif %}">
+            <a href="{{ url_for('reports') }}" id="navReports" class="nav-item {% if request.endpoint == 'reports' %}active{% endif %}">
                 <i class="bi bi-file-earmark-text"></i> <span>Reports</span>
             </a>
-            <a href="{{ url_for('alerts') }}" class="nav-item {% if request.endpoint == 'alerts' %}active{% endif %}">
+            <a href="{{ url_for('alerts') }}" id="navAlerts" class="nav-item {% if request.endpoint == 'alerts' %}active{% endif %}">
                 <i class="bi bi-exclamation-triangle"></i> <span>Alerts</span>
             </a>
 
@@ -170,6 +170,44 @@
                 const hi = document.getElementById('navHistory');
                 if (mu) mu.style.display = 'flex';
                 if (hi) hi.style.display = 'flex';
+            }
+
+            // Role-based nav visibility: each role only sees the modules it
+            // actually needs. Admin always sees everything (handled above +
+            // skipped entirely below). Group headers hide themselves too
+            // when every item under them is hidden, so no orphaned "Reporting"
+            // label sits above nothing.
+            if (user.role !== 'admin') {
+                const roleNavMap = {
+                    store_manager: ['navMaterials', 'navSuppliers', 'navInventory', 'navCriticalSpares', 'navPurchases', 'navRequests', 'navIssues', 'navRouteCard', 'navReturns', 'navAlerts'],
+                    purchase:      ['navMaterials', 'navSuppliers', 'navPurchases', 'navAlerts', 'navReports'],
+                    production:    ['navRequests', 'navRouteCard', 'navAlerts'],
+                    quality:       ['navPurchases', 'navAlerts'],
+                    management:    ['navReports', 'navAlerts'],
+                    operation:     ['navRequests', 'navAlerts'],
+                    accounts:      ['navPurchases', 'navIssues', 'navReports', 'navAlerts'],
+                };
+                const allowed = new Set(roleNavMap[user.role] || []);
+                const allNavIds = ['navMaterials', 'navSuppliers', 'navInventory', 'navCriticalSpares', 'navPurchases',
+                                    'navRequests', 'navIssues', 'navRouteCard', 'navReturns', 'navReports', 'navAlerts'];
+                allNavIds.forEach(id => {
+                    const el = document.getElementById(id);
+                    if (el && !allowed.has(id)) el.style.display = 'none';
+                });
+
+                // Hide a group header if every item in that group is hidden.
+                const groups = {
+                    navGroupInventory:   ['navMaterials', 'navSuppliers', 'navInventory', 'navCriticalSpares'],
+                    navGroupPurchasing:  ['navPurchases'],
+                    navGroupOperations:  ['navRequests', 'navIssues', 'navRouteCard', 'navReturns'],
+                    navGroupReporting:   ['navReports', 'navAlerts'],
+                };
+                Object.entries(groups).forEach(([groupId, itemIds]) => {
+                    const groupEl = document.getElementById(groupId);
+                    if (!groupEl) return;
+                    const anyVisible = itemIds.some(id => allowed.has(id));
+                    groupEl.style.display = anyVisible ? 'block' : 'none';
+                });
             }
 
             // Load notifications
