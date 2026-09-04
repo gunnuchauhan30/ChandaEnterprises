@@ -27,9 +27,11 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column("purchases", sa.Column("accounts_approval_status", sa.String(20), nullable=False, server_default="pending"))
-    op.add_column("purchases", sa.Column("accounts_approved_by", sa.Integer(), sa.ForeignKey("users.id"), nullable=True))
-    op.add_column("purchases", sa.Column("accounts_approved_at", sa.DateTime(), nullable=True))
+    # IF NOT EXISTS: makes this safe to re-run no matter what partial state
+    # an earlier interrupted deploy left behind.
+    op.execute("ALTER TABLE purchases ADD COLUMN IF NOT EXISTS accounts_approval_status VARCHAR(20) NOT NULL DEFAULT 'pending'")
+    op.execute("ALTER TABLE purchases ADD COLUMN IF NOT EXISTS accounts_approved_by INTEGER REFERENCES users(id)")
+    op.execute("ALTER TABLE purchases ADD COLUMN IF NOT EXISTS accounts_approved_at TIMESTAMP")
 
     # Backfill historical QC-passed GRNs as accounts-approved, WITHOUT
     # letting the (still old-logic at this point) trigger fire again.
