@@ -6,7 +6,7 @@ from datetime import date
 from app.db.session import get_db
 from app.core.deps import get_current_user
 from app.models import User
-from app.schemas.misc import DashboardOut
+from app.schemas.misc import DashboardOut, PendingApprovalsOut, PendingApprovalItem
 
 router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
 
@@ -81,3 +81,82 @@ def dashboard(db: Session = Depends(get_db), _: User = Depends(get_current_user)
         issue_trend=[dict(r) for r in issue_trend],
         department_consumption=[dict(r) for r in department_consumption],
     )
+
+
+@router.get("/pending-approvals", response_model=PendingApprovalsOut)
+def pending_approvals(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """
+    Powers the 'Pending Approvals' dashboard card. Shows ONLY what the
+    logged-in user's own role can act on -- Operation sees pending
+    requests, Accounts sees pending GRNs + Issues, Quality sees pending
+    QC, Store sees Operation-approved requests still waiting to be issued.
+    Admin sees everything, all four kinds combined.
+    """
+    role = current_user.role.value if hasattr(current_user.role, "value") else current_user.role
+    items: list[PendingApprovalItem] = []
+
+    def add(kind, rows, label_fn, detail_fn):
+        for r in rows:
+            items.append(PendingApprovalItem(
+                kind=kind, ref_id=r["id"], label=label_fn(r), detail=detail_fn(r), created_at=r["created_at"],
+            ))
+
+    if role in ("operation", "admin"):
+        rows = db.execute(text("""
+            SELECT er.id, er.request_no, er.material_code, er.requested_qty, er.raised_by_name,
+                   er.department, er.created_at
+            FROM employee_requests er
+            WHERE er.status = 'pending'
+            ORDER BY er.created_at ASC
+        """)).mappings().all()
+        add("request_operation", rows,
+            lambda r: f"Request {r['request_no']}",
+            lambda r: f"{r['material_code']} · qty {r['requested_qty']} · raised by {r['raised_by_name']} ({r['department'] or '-'})")
+
+    if role in ("accounts", "admin"):
+        grn_rows = db.execute(text("""
+            SELECT p.id, p.grn_no, p.material_code, p.qty, p.created_at
+            FROM purchases p
+            WHERE p.qc_status = 'passed' AND p.accounts_approval_status = 'pending'
+            ORDER BY p.created_at ASC
+        """)).mappings().all()
+        add("grn_accounts", grn_rows,
+            lambda r: f"GRN {r['grn_no']}",
+            lambda r: f"{r['material_code']} · qty {r['qty']} · QC passed, awaiting Accounts")
+
+        issue_rows = db.execute(text("""
+            SELECT i.id, i.issue_no, i.material_code, i.issue_qty, i.created_at
+            FROM issues i
+            WHERE i.accounts_approval_status = 'pending'
+            ORDER BY i.created_at ASC
+        """)).mappings().all()
+        add("issue_accounts", issue_rows,
+            lambda r: f"Issue {r['issue_no']}",
+            lambda r: f"{r['material_code']} · qty {r['issue_qty']} · awaiting Accounts")
+
+    if role in ("quality", "admin"):
+        rows = db.execute(text("""
+            SELECT p.id, p.grn_no, p.material_code, p.qty, p.created_at
+            FROM purchases p
+            WHERE p.qc_status = 'pending'
+            ORDER BY p.created_at ASC
+        """)).mappings().all()
+        add("grn_qc", rows,
+            lambda r: f"GRN {r['grn_no']}",
+            lambda r: f"{r['material_code']} · qty {r['qty']} · awaiting QC")
+
+    if role in ("store_manager", "admin"):
+        rows = db.execute(text("""
+            SELECT er.id, er.request_no, er.material_code,
+                   (er.requested_qty - COALESCE(er.fulfilled_qty,0)) AS pending_qty, er.created_at
+            FROM employee_requests er
+            WHERE er.status IN ('approved','partial')
+              AND (er.requested_qty - COALESCE(er.fulfilled_qty,0)) > 0
+            ORDER BY er.created_at ASC
+        """)).mappings().all()
+        add("request_store", rows,
+            lambda r: f"Request {r['request_no']}",
+            lambda r: f"{r['material_code']} · pending {r['pending_qty']} · Operation-approved, ready to issue")
+
+    items.sort(key=lambda x: x.created_at)
+    return PendingApprovalsOut(role=role, items=items)
