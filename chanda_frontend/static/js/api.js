@@ -317,8 +317,15 @@ class API {
         return { items: Array.isArray(data) ? data : (data && data.items) || [] };
     }
 
-    static async createIssue(data) {
-        return this.request('/issues', { method: 'POST', body: data });
+    static async createIssueFromRequest(requestId, data) {
+        return this.request(`/issues/from-request/${requestId}`, { method: 'POST', body: data });
+    }
+
+    static async issueAccountsApproval(issueId, status, remarks = '') {
+        return this.request(`/issues/${issueId}/accounts-approval`, {
+            method: 'PATCH',
+            body: { status, remarks },
+        });
     }
 
     static async updateIssueConsumption(issueId, consumedQty, completionStatus = 'completed') {
