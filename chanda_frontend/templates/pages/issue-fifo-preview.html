@@ -25,7 +25,7 @@
         </div>
 
         <div style="font-size:13px; color:var(--text-lighter); margin-bottom:18px;">
-            📅 FIFO order — <b>oldest supplier stock is deducted first.</b> Below is exactly which supplier this quantity will come from.
+            📅 FIFO order — <b>oldest supplier stock is deducted first.</b> This preview is <b>indicative only</b> -- the actual batches are locked in only when Accounts approves this issue (stock does not move now).
         </div>
 
         <!-- FIFO flow -->
@@ -43,7 +43,7 @@
 
         <!-- Actions -->
         <div style="display:flex; gap:12px; margin-top:26px;">
-            <button id="confirmBtn" class="btn btn-primary" onclick="confirmIssue()"><i class="bi bi-check-lg"></i> Confirm &amp; Create Issue</button>
+            <button id="confirmBtn" class="btn btn-primary" onclick="confirmIssue()"><i class="bi bi-check-lg"></i> Confirm &amp; Create Issue (awaiting Accounts approval)</button>
             <a href="/issues/new" class="btn btn-secondary"><i class="bi bi-arrow-left"></i> Back / Edit</a>
         </div>
     </div>
@@ -83,7 +83,7 @@
     });
 
     function renderPreview(fifo) {
-        document.getElementById('hdrMaterial').textContent = `${fifo.material_code} — ${fifo.material_name}`;
+        document.getElementById('hdrMaterial').textContent = pendingPayload.material_label || `${fifo.material_code} — ${fifo.material_name}`;
         document.getElementById('hdrQty').textContent = `${fifo.quantity_requested} ${fifo.uom || ''}`;
 
         const flow = document.getElementById('fifoFlow');
@@ -127,12 +127,12 @@
         if (fifo.status === 'success') {
             statusBox.style.background = 'rgba(74,222,128,0.1)';
             statusBox.style.color = '#4ade80';
-            statusBox.innerHTML = `✓ Full quantity (${fifo.quantity_requested}) is available and can be issued via FIFO.`;
+            statusBox.innerHTML = `✓ Full quantity (${fifo.quantity_requested}) is available right now (indicative -- final batches lock in at Accounts approval).`;
             confirmBtn.disabled = false;
         } else {
             statusBox.style.background = 'rgba(239,68,68,0.1)';
             statusBox.style.color = '#ef4444';
-            statusBox.innerHTML = `⚠ Insufficient stock — short by ${fifo.shortfall} ${fifo.uom || ''}. You can still issue what's available, or go back and reduce the quantity.`;
+            statusBox.innerHTML = `⚠ Insufficient stock right now — short by ${fifo.shortfall} ${fifo.uom || ''}. You can still create the issue; Accounts approval will fail if stock is still short at that point.`;
             confirmBtn.disabled = false;
         }
 
@@ -159,11 +159,11 @@
         btn.disabled = true;
         btn.innerHTML = '<div class="spinner" style="width:16px;height:16px;display:inline-block;"></div> Creating...';
 
-        const result = await API.createIssue(pendingPayload);
+        const result = await API.createIssueFromRequest(pendingPayload.request_id, pendingPayload);
         if (result) {
             sessionStorage.removeItem('pendingIssuePayload');
             sessionStorage.removeItem('pendingIssueMaterialLabel');
-            showAlert(`Issue ${result.issue_no} created`, 'success');
+            showAlert(`Issue ${result.issue_no} created -- awaiting Accounts approval before stock moves.`, 'success');
             setTimeout(() => window.location.href = '/issues', 800);
         } else {
             btn.disabled = false;
