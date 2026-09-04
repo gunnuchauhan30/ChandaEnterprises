@@ -297,10 +297,34 @@ class Issue(Base):
     remark = Column(String(255))
     issue_date = Column(Date, server_default=func.current_date())
     created_at = Column(DateTime, server_default=func.now())
+    # Accounts is the final gate -- stock only moves once this flips to
+    # 'approved' (see fn_trg_issue_stock, BEFORE UPDATE trigger). Creating
+    # the Issue row (Store's step) never moves stock by itself anymore.
+    accounts_approval_status = Column(String(20), nullable=False, default="pending")
+    accounts_approved_by = Column(Integer, ForeignKey("users.id"))
+    accounts_approved_at = Column(DateTime)
 
     __table_args__ = (CheckConstraint("issue_qty > 0", name="chk_issue_qty_positive"),)
 
     material = relationship("Material", foreign_keys=[material_code], viewonly=True)
+
+
+class IssueBatchAllocation(Base):
+    """Exact per-batch FIFO breakdown for an issue, written by the DB
+    trigger at the moment Accounts approval actually moves stock (see
+    fn_trg_issue_stock). This is what lets 'Update Consumption' / issue
+    review show the FULL FIFO split (every batch drawn from, not just the
+    first/oldest one) -- issues created before this table existed will
+    simply have no rows here, and the API falls back to the old
+    single-batch (lot_no) view for those."""
+    __tablename__ = "issue_batch_allocations"
+
+    id = Column(Integer, primary_key=True)
+    issue_id = Column(Integer, ForeignKey("issues.id", ondelete="CASCADE"), nullable=False)
+    stock_batch_id = Column(Integer, ForeignKey("stock_batches.id"))
+    batch_no = Column(String(50))
+    qty_taken = Column(Numeric(12, 2), nullable=False)
+    created_at = Column(DateTime, server_default=func.now())
 
 
 # ------------------------- Return -------------------------
