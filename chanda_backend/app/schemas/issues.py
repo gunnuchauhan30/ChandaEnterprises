@@ -68,6 +68,10 @@ class EmployeeRequestOut(BaseModel):
 
 # Direct store-issue (Route Card module) — bypasses employee_request when store
 # manager issues material directly against a production order / job card.
+# NOTE: this is kept only as the shared field-set for IssueOut. The endpoint
+# that let you create one of these WITHOUT a request has been removed --
+# every issue now has to come from an approved employee_request (see
+# IssueFromRequestIn below).
 class IssueIn(BaseModel):
     material_code: str
     employee_request_id: Optional[int] = None
@@ -82,6 +86,38 @@ class IssueIn(BaseModel):
     required_qty: Optional[Decimal] = None
     issue_qty: Decimal = Field(gt=0)
     remark: Optional[str] = None
+
+
+class IssueFromRequestIn(BaseModel):
+    """Store creates an issue against an already Operation-approved request.
+    material_code/employee_request_id come from the request itself, not
+    from this payload. Stock does NOT move yet -- only once Accounts
+    approves this issue (see IssueAccountsApproval)."""
+    issue_qty: Decimal = Field(gt=0)
+    job_card_no: Optional[str] = None
+    production_order_no: Optional[str] = None
+    part_number: Optional[str] = None
+    machine: Optional[str] = None
+    operation: Optional[str] = None
+    department: Optional[str] = None
+    shift: Optional[str] = None
+    required_qty: Optional[Decimal] = None
+    remark: Optional[str] = None
+
+
+class IssueAccountsApproval(BaseModel):
+    status: str = Field(description="approved|rejected")
+    remarks: Optional[str] = None
+
+
+class IssueBatchAllocationOut(BaseModel):
+    batch_no: Optional[str] = None
+    qty_taken: Decimal
+    supplier_name: Optional[str] = None
+    received_date: Optional[date] = None
+
+    class Config:
+        from_attributes = True
 
 
 class FIFOCheckIn(BaseModel):
@@ -118,6 +154,9 @@ class IssueOut(BaseModel):
     remark: Optional[str]
     issue_date: date
     created_at: datetime
+    accounts_approval_status: str = "pending"
+    accounts_approved_by: Optional[int] = None
+    accounts_approved_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
