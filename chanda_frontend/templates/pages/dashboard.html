@@ -82,6 +82,30 @@
                 </div>
             </div>
         </a>
+
+        <a href="#pendingApprovalsPanel" class="kpi-card card-3d glass" style="display:block; text-decoration:none; color:inherit; cursor:pointer; transition: transform 0.15s;" onmouseover="this.style.transform='translateY(-3px)'" onmouseout="this.style.transform='translateY(0)'">
+            <div style="display: flex; justify-content: space-between; align-items: start;">
+                <div>
+                    <div class="kpi-label">Pending Approvals</div>
+                    <div class="kpi-value" id="pendingApprovalsCount" style="color: #8b5cf6;">0</div>
+                    <div class="kpi-change" style="color: #8b5cf6;">Waiting on you</div>
+                </div>
+                <div style="font-size: 32px; color: #8b5cf6; opacity: 0.3;">
+                    <i class="bi bi-hourglass-split"></i>
+                </div>
+            </div>
+        </a>
+    </div>
+
+    <!-- Pending Approvals panel: role-aware. Operation sees only pending
+         requests, Accounts sees only pending GRN/Issue approvals, Quality
+         sees only pending QC, Store sees Operation-approved requests ready
+         to issue, Admin sees everything. -->
+    <div id="pendingApprovalsPanel" class="glass card-3d" style="padding: 24px; border-radius: 12px; margin-bottom: 30px;">
+        <h3 style="margin: 0 0 16px; font-size: 16px; color: var(--accent-purple);"><i class="bi bi-hourglass-split"></i> Pending Approvals</h3>
+        <div id="pendingApprovalsList" style="display: flex; flex-direction: column; gap: 10px;">
+            <div style="color: #999; font-size: 13px;">Loading...</div>
+        </div>
     </div>
 
     <!-- Charts Row -->
@@ -176,15 +200,61 @@
         // consumption routes, everything comes back from GET /dashboard)
         await loadDashboard();
 
+        // Role-aware Pending Approvals card
+        await loadPendingApprovals();
+
         // Load alerts (separate endpoint, only-open filter)
         await loadAlerts();
 
         // Refresh every minute
         setInterval(() => {
             loadDashboard();
+            loadPendingApprovals();
             loadAlerts();
         }, 60000);
     });
+
+    async function loadPendingApprovals() {
+        const data = await API.getPendingApprovals();
+        const list = document.getElementById('pendingApprovalsList');
+        if (!data) { list.innerHTML = '<div style="color:#999; font-size:13px;">Could not load.</div>'; return; }
+
+        document.getElementById('pendingApprovalsCount').textContent = data.items.length;
+
+        if (data.items.length === 0) {
+            list.innerHTML = '<div style="color:#999; font-size:13px;">Nothing pending for you right now.</div>';
+            return;
+        }
+
+        const linkFor = (kind) => ({
+            request_operation: '/requests',
+            grn_accounts: '/purchases',
+            issue_accounts: '/issues',
+            grn_qc: '/purchases',
+            request_store: '/issues/new',
+        }[kind] || '#');
+
+        const iconFor = (kind) => ({
+            request_operation: 'bi-clipboard-check',
+            grn_accounts: 'bi-receipt',
+            issue_accounts: 'bi-arrow-up-left',
+            grn_qc: 'bi-clipboard-pulse',
+            request_store: 'bi-box-arrow-up-right',
+        }[kind] || 'bi-hourglass-split');
+
+        list.innerHTML = data.items.map(item => `
+            <a href="${linkFor(item.kind)}" style="display:flex; justify-content:space-between; align-items:center; padding:10px 14px; background:var(--glass-dark); border-radius:8px; text-decoration:none; color:inherit;">
+                <div style="display:flex; align-items:center; gap:10px;">
+                    <i class="bi ${iconFor(item.kind)}" style="color:#8b5cf6;"></i>
+                    <div>
+                        <div style="font-size:13px; font-weight:600;">${item.label}</div>
+                        <div style="font-size:12px; color:#999;">${item.detail}</div>
+                    </div>
+                </div>
+                <i class="bi bi-chevron-right" style="color:#666;"></i>
+            </a>
+        `).join('');
+    }
 
     async function loadDashboard() {
         const data = await API.getDashboard();
