@@ -1,16 +1,17 @@
-from datetime import date
+from datetime import date, datetime
 from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import func
+from sqlalchemy.exc import DBAPIError
 from typing import Optional, List
 
 from app.db.session import get_db, SessionLocal
 from app.core.deps import get_current_user, require_roles
-from app.models import EmployeeRequest, Issue, Return, Material, User, StockBatch, Purchase, Supplier
+from app.models import EmployeeRequest, Issue, IssueBatchAllocation, Return, Material, User, StockBatch, Purchase, Supplier
 from app.schemas.issues import (
     EmployeeRequestIn, EmployeeRequestOut, EmployeeRequestDecision,
-    IssueIn, IssueOut, IssueConsumptionUpdate,
+    IssueFromRequestIn, IssueAccountsApproval, IssueOut, IssueConsumptionUpdate,
     ReturnIn, ReturnOut, FIFOCheckIn,
 )
 from app.services.numbering import next_request_no, next_issue_no, next_return_no
@@ -89,11 +90,13 @@ def create_request(
 
 def _issue_against_request(db: Session, req: EmployeeRequest, fulfill_qty, issued_by_id: int) -> Issue:
     """
-    Creates one Issue row for `fulfill_qty` against a request. Inserting into
-    `issues` fires the existing DB trigger (fn_trg_issue_stock) which deducts
-    material.current_qty and consumes FIFO stock_batches automatically -- so
-    stock only ever moves through this one, already-battle-tested code path,
-    whether it's a full approval or a partial/backorder top-up.
+    Creates one Issue row for `fulfill_qty` against a request, with
+    accounts_approval_status='pending'. This does NOT move any stock and
+    does NOT touch req.fulfilled_qty -- that only happens once Accounts
+    approves this specific issue (see issue_accounts_approval below). This
+    keeps the backorder auto-settlement path consistent with the manual
+    Store-creates-issue path: an Issue existing is never, by itself,
+    evidence that stock has actually moved.
     """
     issue = Issue(
         issue_no=next_issue_no(db),
@@ -106,10 +109,10 @@ def _issue_against_request(db: Session, req: EmployeeRequest, fulfill_qty, issue
         consumed_qty=0,
         completion_status="issued",
         issued_by=issued_by_id,
+        accounts_approval_status="pending",
     )
     db.add(issue)
-    db.flush()  # let trg_issue_stock run now, so material.available_qty is fresh for the next loop iteration
-    req.fulfilled_qty = (req.fulfilled_qty or 0) + fulfill_qty
+    db.flush()
     return issue
 
 
@@ -167,11 +170,13 @@ def list_backorders(
     _: User = Depends(get_current_user),
 ):
     """
-    Point 12: the FIFO backorder queue -- every request that still has
-    pending_qty > 0, oldest first. This is what the dedicated Backorders
-    page reads from.
+    Point 12: the FIFO backorder queue -- every Operation-approved request
+    that still has pending_qty > 0, oldest first. This is what the
+    dedicated Backorders page reads from. Only 'approved'/'partial'
+    requests qualify -- a request Operation hasn't approved yet is not a
+    backorder, it's just an unapproved request.
     """
-    q = db.query(EmployeeRequest).filter(EmployeeRequest.status.in_(["partial", "pending"]))
+    q = db.query(EmployeeRequest).filter(EmployeeRequest.status.in_(["approved", "partial"]))
     if material_code:
         q = q.filter(EmployeeRequest.material_code == material_code)
     rows = q.order_by(EmployeeRequest.created_at.asc()).all()
@@ -181,22 +186,29 @@ def list_backorders(
 @router.post("/employee-requests/backorders/process/{material_code}")
 def process_backorders(
     material_code: str,
-    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles("store_manager")),
+    current_user: User = Depends(require_roles("store_manager", "admin")),
 ):
     """
     Point 12 (FIFO settlement): call this whenever new stock has just come in
-    for a material (e.g. automatically after a Purchase/GRN passes QC -- see
+    for a material (e.g. after a GRN's Accounts approval -- see
     purchases.py). Walks every open backorder for that material, oldest
-    request first, and tops each one up from available stock until either
-    the queue is empty or the stock runs out.
+    Operation-approved request first, and auto-creates a pending Issue for
+    each one to the extent stock is nominally available right now.
+
+    IMPORTANT: this only creates Issue rows (accounts_approval_status=
+    'pending') -- it is the automated equivalent of Store's "create issue
+    from approved request" step, nothing more. It does NOT move stock and
+    does NOT touch req.fulfilled_qty/status -- Accounts still has to
+    approve each of these issues individually before stock actually
+    changes (see issue_accounts_approval below). Because of that, the
+    "available stock" this checks against does not account for OTHER
+    pending-but-not-yet-accounts-approved issues that may already be
+    queued against the same material -- Accounts approval itself is the
+    real backstop against overselling (it will reject with 400 if stock
+    genuinely runs short by the time it's actually deducted).
     """
-    # Lock the material row for this whole settlement pass -- same reasoning
-    # as decide_request above: prevents two "Try Fulfill" calls for the same
-    # material (double-click, or two people clicking at once) from both
-    # reading stale available_qty and racing each other into a 500.
-    material = db.query(Material).filter(Material.material_code == material_code).with_for_update().first()
+    material = db.query(Material).filter(Material.material_code == material_code).first()
     if not material:
         raise HTTPException(404, "Material not found")
 
@@ -204,37 +216,38 @@ def process_backorders(
         db.query(EmployeeRequest)
         .filter(
             EmployeeRequest.material_code == material_code,
-            EmployeeRequest.status.in_(["partial", "pending"]),
+            EmployeeRequest.status.in_(["approved", "partial"]),
         )
         .order_by(EmployeeRequest.created_at.asc())  # FIFO: oldest first
         .all()
     )
 
-    settled, still_pending = [], []
+    created, skipped = [], []
+    remaining_stock = material.available_qty
     for req in pending_reqs:
-        remaining_needed = req.requested_qty - (req.fulfilled_qty or 0)
+        already_committed = (req.fulfilled_qty or 0) + sum(
+            i.issue_qty for i in
+            db.query(Issue).filter(Issue.employee_request_id == req.id, Issue.accounts_approval_status == "pending").all()
+        )
+        remaining_needed = req.requested_qty - already_committed
         if remaining_needed <= 0:
             continue
-        db.refresh(material)  # pick up stock consumed by earlier iterations of this same loop
-        if material.available_qty <= 0:
-            still_pending.append(req.request_no)
+        if remaining_stock <= 0:
+            skipped.append(req.request_no)
             continue
 
-        fulfill_qty = min(material.available_qty, remaining_needed)
-        _issue_against_request(db, req, fulfill_qty, current_user.id)
-        req.approved_by = req.approved_by or current_user.id
-        req.approved_at = req.approved_at or func.now()
-        req.status = "completed" if req.fulfilled_qty >= req.requested_qty else "partial"
-        settled.append({"request_no": req.request_no, "issued_now": float(fulfill_qty), "status": req.status})
+        fulfill_qty = min(remaining_stock, remaining_needed)
+        issue = _issue_against_request(db, req, fulfill_qty, current_user.id)
+        remaining_stock -= fulfill_qty
+        created.append({"request_no": req.request_no, "issue_no": issue.issue_no, "issue_qty": float(fulfill_qty)})
 
     db.commit()
     log_activity(
         db, current_user.id,
-        f"Processed FIFO backorders for {material_code}: {len(settled)} request(s) topped up",
+        f"Auto-created {len(created)} pending issue(s) from backorders for {material_code} (awaiting Accounts approval)",
         "employee_requests",
     )
-    background_tasks.add_task(_notify_alerts_task, material_code)
-    return {"material_code": material_code, "settled": settled, "still_pending": still_pending}
+    return {"material_code": material_code, "issues_created": created, "still_pending": skipped}
 
 
 # ================= Issues (Route Card) =================
@@ -347,18 +360,48 @@ def issue_fifo_source(
     Supplier Breakdown card as the New Issue form before the user fills
     in the consumed quantity.
 
-    Issue.lot_no is the batch that was oldest (i.e. FIFO-first) at the
-    moment this issue was created (see create_direct_issue below) --
-    that's the batch/supplier we look up here. Note: if the issued qty
-    was large enough to span more than one batch, the DB trigger
-    (fn_trg_issue_stock) does the multi-batch FIFO deduction but doesn't
-    persist a per-batch split anywhere, so lot_no reflects the first/
-    oldest batch drawn from, not necessarily every batch touched.
+    Reads from issue_batch_allocations, written by the DB trigger at the
+    moment Accounts approved this issue (fn_trg_issue_stock) -- so this
+    now shows the FULL FIFO split (every batch actually drawn from), not
+    just the first one. Issues from before this table existed (or issues
+    still awaiting Accounts approval) fall back to the single lot_no view,
+    or an empty allocation if nothing has been drawn yet.
     """
     issue = db.query(Issue).get(issue_id)
     if not issue:
         raise HTTPException(404, "Issue not found")
 
+    allocations = (
+        db.query(IssueBatchAllocation, StockBatch, Supplier.supplier_name)
+        .outerjoin(StockBatch, IssueBatchAllocation.stock_batch_id == StockBatch.id)
+        .outerjoin(Purchase, StockBatch.purchase_id == Purchase.id)
+        .outerjoin(Supplier, Purchase.supplier_id == Supplier.id)
+        .filter(IssueBatchAllocation.issue_id == issue.id)
+        .order_by(IssueBatchAllocation.id.asc())
+        .all()
+    )
+
+    if allocations:
+        rows = []
+        for alloc, batch, supplier_name in allocations:
+            rows.append({
+                "supplier_name": supplier_name or "Direct / Unassigned",
+                "batch_no": alloc.batch_no,
+                "received_date": batch.received_date.isoformat() if batch and batch.received_date else None,
+                "available": float(batch.remaining_qty) if batch else None,
+                "issue_qty": float(alloc.qty_taken),
+                "remaining_after": float(batch.remaining_qty) if batch else None,
+            })
+        return {"issue_id": issue.id, "issue_qty": float(issue.issue_qty), "allocation": rows}
+
+    if issue.accounts_approval_status != "approved":
+        return {
+            "issue_id": issue.id, "issue_qty": float(issue.issue_qty), "allocation": [],
+            "note": "Stock has not moved yet -- this issue is still awaiting Accounts approval.",
+        }
+
+    # Fallback for issues approved before this table existed: old single
+    # lot_no view (first/oldest batch only, not necessarily the full split).
     if not issue.lot_no:
         return {"issue_id": issue.id, "issue_qty": float(issue.issue_qty), "allocation": []}
 
@@ -374,11 +417,6 @@ def issue_fifo_source(
         return {"issue_id": issue.id, "issue_qty": float(issue.issue_qty), "allocation": []}
 
     available_now = float(batch.remaining_qty)
-
-    # Same shape as one row of /issues/fifo-check's `allocation` array, so
-    # the frontend can render it with the exact same flow-card component
-    # used on the New Issue page. issue_qty here is what THIS issue actually
-    # took at the time it was created (not a fresh recalculation).
     return {
         "issue_id": issue.id,
         "issue_qty": float(issue.issue_qty),
@@ -393,50 +431,110 @@ def issue_fifo_source(
     }
 
 
-@router.post("/issues", response_model=IssueOut, status_code=201)
-def create_direct_issue(
-    payload: IssueIn,
-    background_tasks: BackgroundTasks,
+@router.post("/issues/from-request/{request_id}", response_model=IssueOut, status_code=201)
+def create_issue_from_request(
+    request_id: int,
+    payload: IssueFromRequestIn,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles("store_manager")),
+    current_user: User = Depends(require_roles("store_manager", "admin")),
 ):
-    """Direct store issue against a Production Order / Job Card / Machine /
-    Operation (Route Card module) -- used when material is issued straight
-    from the floor without going through the employee-request workflow."""
-    # Same row-lock reasoning as decide_request / process_backorders: two
-    # direct issues for the same material at nearly the same instant should
-    # queue up rather than race and crash.
-    material = db.query(Material).filter(Material.material_code == payload.material_code).with_for_update().first()
-    if not material:
-        raise HTTPException(404, "Material not found")
-    if material.available_qty < payload.issue_qty:
-        raise HTTPException(400, f"Insufficient available stock: have {material.available_qty}")
+    """
+    Store creates an issue against a request Operation has already
+    approved. This does NOT move stock -- it only records that Store is
+    committing to issue this quantity. Stock only actually moves once
+    Accounts approves this issue (PATCH /issues/{id}/accounts-approval).
+    This replaces the old "New Issue" direct-issue button -- every issue
+    now has to trace back to an approved request.
+    """
+    req = db.query(EmployeeRequest).get(request_id)
+    if not req:
+        raise HTTPException(404, "Request not found")
+    if req.status not in ("approved", "partial"):
+        raise HTTPException(400, f"Request must be Operation-approved first (current status: {req.status})")
 
-    payload_data = payload.model_dump()
-    if not payload_data.get("lot_no"):
-        # Point 5: same series that GRN generated (LOT-000001, ...) --
-        # picked from the oldest batch with stock left, i.e. the one FIFO
-        # will actually consume for this issue, so the Route Card print
-        # always shows the lot that's genuinely going out the door.
-        oldest_batch = (
-            db.query(StockBatch)
-            .filter(StockBatch.material_code == payload.material_code, StockBatch.remaining_qty > 0)
-            .order_by(StockBatch.received_date.asc(), StockBatch.id.asc())
-            .first()
-        )
-        if oldest_batch:
-            payload_data["lot_no"] = oldest_batch.batch_no
+    already_committed = (req.fulfilled_qty or 0) + sum(
+        i.issue_qty for i in
+        db.query(Issue).filter(Issue.employee_request_id == req.id, Issue.accounts_approval_status == "pending").all()
+    )
+    remaining = req.requested_qty - already_committed
+    if payload.issue_qty > remaining:
+        raise HTTPException(400, f"issue_qty exceeds what's left on this request: {remaining} remaining")
 
     issue = Issue(
         issue_no=next_issue_no(db),
+        material_code=req.material_code,
+        employee_request_id=req.id,
+        issue_qty=payload.issue_qty,
+        job_card_no=payload.job_card_no or req.job_card_no,
+        production_order_no=payload.production_order_no,
+        part_number=payload.part_number or req.part_number,
+        machine=payload.machine,
+        operation=payload.operation,
+        department=payload.department or req.department,
+        shift=payload.shift,
+        required_qty=payload.required_qty,
+        remark=payload.remark,
+        consumed_qty=0,
+        completion_status="issued",
         issued_by=current_user.id,
-        **payload_data,
+        accounts_approval_status="pending",
     )
     db.add(issue)
     db.commit()
     db.refresh(issue)
-    log_activity(db, current_user.id, f"Issued {issue.issue_no} for job card {payload.job_card_no}", "issues")
-    background_tasks.add_task(_notify_alerts_task, issue.material_code)
+    log_activity(db, current_user.id, f"Created issue {issue.issue_no} against request {req.request_no} (awaiting Accounts approval)", "issues")
+    return issue
+
+
+@router.patch("/issues/{issue_id}/accounts-approval", response_model=IssueOut)
+def issue_accounts_approval(
+    issue_id: int,
+    payload: IssueAccountsApproval,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles("accounts", "admin")),
+):
+    """
+    Final sign-off on an issue. This is the ONLY step that actually moves
+    stock -- the DB trigger (fn_trg_issue_stock) deducts current_qty,
+    consumes FIFO stock_batches, and writes the full per-batch breakdown to
+    issue_batch_allocations only when accounts_approval_status flips to
+    'approved' here. Rejecting leaves stock untouched and the underlying
+    request stays 'approved'/'partial' so Store can create a corrected
+    issue against it if needed.
+    """
+    if payload.status not in ("approved", "rejected"):
+        raise HTTPException(400, "status must be 'approved' or 'rejected'")
+    issue = db.query(Issue).get(issue_id)
+    if not issue:
+        raise HTTPException(404, "Issue not found")
+    if issue.accounts_approval_status != "pending":
+        raise HTTPException(400, f"This issue has already been {issue.accounts_approval_status} by Accounts")
+
+    issue.accounts_approval_status = payload.status
+    issue.accounts_approved_by = current_user.id
+    issue.accounts_approved_at = datetime.utcnow()
+
+    try:
+        db.commit()
+    except DBAPIError as e:
+        db.rollback()
+        # fn_post_stock_ledger raises a plain Postgres exception when stock
+        # would go negative -- surface that as a clean 400 instead of a 500.
+        raise HTTPException(400, f"Could not approve: insufficient stock right now for {issue.material_code}") from e
+
+    db.refresh(issue)
+    log_activity(db, current_user.id, f"Issue {issue.issue_no} accounts-{payload.status}", "issues")
+
+    if payload.status == "approved":
+        background_tasks.add_task(_notify_alerts_task, issue.material_code)
+        if issue.employee_request_id:
+            req = db.query(EmployeeRequest).get(issue.employee_request_id)
+            if req:
+                req.fulfilled_qty = (req.fulfilled_qty or 0) + issue.issue_qty
+                req.status = "completed" if req.fulfilled_qty >= req.requested_qty else "partial"
+                db.commit()
+
     return issue
 
 
