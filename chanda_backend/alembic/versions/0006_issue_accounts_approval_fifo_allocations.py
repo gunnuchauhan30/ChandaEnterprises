@@ -31,20 +31,21 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.create_table(
-        "issue_batch_allocations",
-        sa.Column("id", sa.Integer(), primary_key=True),
-        sa.Column("issue_id", sa.Integer(), sa.ForeignKey("issues.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("stock_batch_id", sa.Integer(), sa.ForeignKey("stock_batches.id"), nullable=True),
-        sa.Column("batch_no", sa.String(50), nullable=True),
-        sa.Column("qty_taken", sa.Numeric(12, 2), nullable=False),
-        sa.Column("created_at", sa.DateTime(), server_default=sa.func.now()),
-    )
-    op.create_index("ix_issue_batch_allocations_issue_id", "issue_batch_allocations", ["issue_id"])
+    op.execute("""
+        CREATE TABLE IF NOT EXISTS issue_batch_allocations (
+            id SERIAL PRIMARY KEY,
+            issue_id INTEGER NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
+            stock_batch_id INTEGER REFERENCES stock_batches(id),
+            batch_no VARCHAR(50),
+            qty_taken NUMERIC(12,2) NOT NULL,
+            created_at TIMESTAMP DEFAULT NOW()
+        )
+    """)
+    op.execute("CREATE INDEX IF NOT EXISTS ix_issue_batch_allocations_issue_id ON issue_batch_allocations (issue_id)")
 
-    op.add_column("issues", sa.Column("accounts_approval_status", sa.String(20), nullable=False, server_default="pending"))
-    op.add_column("issues", sa.Column("accounts_approved_by", sa.Integer(), sa.ForeignKey("users.id"), nullable=True))
-    op.add_column("issues", sa.Column("accounts_approved_at", sa.DateTime(), nullable=True))
+    op.execute("ALTER TABLE issues ADD COLUMN IF NOT EXISTS accounts_approval_status VARCHAR(20) NOT NULL DEFAULT 'pending'")
+    op.execute("ALTER TABLE issues ADD COLUMN IF NOT EXISTS accounts_approved_by INTEGER REFERENCES users(id)")
+    op.execute("ALTER TABLE issues ADD COLUMN IF NOT EXISTS accounts_approved_at TIMESTAMP")
 
     # Historical issues already had stock deducted under the OLD (AFTER
     # INSERT) trigger -- mark them approved. Safe: the old trigger has no
