@@ -35,8 +35,8 @@
                         <option value="store_manager">Store Manager</option>
                         <option value="purchase">Purchase</option>
                         <option value="quality">Quality (QC pass/fail only)</option>
-                        <option value="operation">Operation (approve Requests only)</option>
-                        <option value="accounts">Accounts (final approval - releases stock)</option>
+                        <option value="operation">Operation (approves material requests)</option>
+                        <option value="accounts">Accounts (final approval - GRN & Issues)</option>
                         <option value="management">Management</option>
                         <option value="admin">Admin</option>
                     </select>
@@ -63,52 +63,6 @@
                     <tr><td colspan="8" style="text-align:center; padding:20px; color:#999;">Loading...</td></tr>
                 </tbody>
             </table>
-        </div>
-    </div>
-
-    <!-- Edit modal -->
-    <div id="editUserModal" class="modal">
-        <div class="modal-content" style="max-width: 480px;">
-            <div class="modal-header">
-                <h2>Edit Employee Account</h2>
-                <button class="close-btn" onclick="closeEditModal()">&times;</button>
-            </div>
-            <form id="editUserForm">
-                <input type="hidden" id="edit_user_id">
-                <div class="form-group">
-                    <label for="edit_full_name">Full Name</label>
-                    <input type="text" id="edit_full_name">
-                </div>
-                <div class="form-group">
-                    <label for="edit_email">Email</label>
-                    <input type="email" id="edit_email">
-                </div>
-                <div class="form-group">
-                    <label for="edit_department">Department</label>
-                    <input type="text" id="edit_department">
-                </div>
-                <div class="form-group">
-                    <label for="edit_role">Role</label>
-                    <select id="edit_role">
-                        <option value="production">Production</option>
-                        <option value="store_manager">Store Manager</option>
-                        <option value="purchase">Purchase</option>
-                        <option value="quality">Quality (QC pass/fail only)</option>
-                        <option value="operation">Operation (approve Requests only)</option>
-                        <option value="accounts">Accounts (final approval - releases stock)</option>
-                        <option value="management">Management</option>
-                        <option value="admin">Admin</option>
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label for="edit_new_password">Reset Password <span style="color:var(--text-lighter); font-weight:400;">(leave blank to keep current)</span></label>
-                    <input type="password" id="edit_new_password" minlength="6" placeholder="New temporary password">
-                </div>
-                <div style="display:flex; gap:10px; margin-top:16px;">
-                    <button type="submit" class="btn btn-primary"><i class="bi bi-check-lg"></i> Save Changes</button>
-                    <button type="button" class="btn btn-secondary" onclick="closeEditModal()">Cancel</button>
-                </div>
-            </form>
         </div>
     </div>
 </div>
@@ -145,11 +99,18 @@
         }
         items.forEach(u => {
             const tr = tbody.insertRow();
+            const roleOptions = ['store_manager', 'purchase', 'production', 'management', 'quality', 'operation', 'accounts', 'admin']
+                .map(r => `<option value="${r}" ${u.role === r ? 'selected' : ''}>${r}</option>`).join('');
             tr.innerHTML = `
                 <td>${u.full_name || '-'}</td>
                 <td>${u.username}</td>
                 <td>${u.email}</td>
-                <td><span class="badge badge-info">${u.role}</span></td>
+                <td>
+                    <select id="roleSelect_${u.id}" style="padding:4px 8px; background: var(--glass-dark); border:1px solid var(--glass-medium); border-radius:6px; color:var(--text-light);">
+                        ${roleOptions}
+                    </select>
+                    <button class="btn btn-sm btn-secondary" onclick="saveRole(${u.id}, '${u.username}')" title="Save role"><i class="bi bi-check-lg"></i></button>
+                </td>
                 <td>${u.department || '-'}</td>
                 <td><span class="badge badge-${u.is_active ? 'success' : 'danger'}">${u.is_active ? 'Active' : 'Disabled'}</span></td>
                 <td>${u.last_login ? formatDateTime(u.last_login) : 'Never'}</td>
@@ -163,6 +124,15 @@
                 </td>
             `;
         });
+    }
+
+    async function saveRole(userId, username) {
+        const newRole = document.getElementById(`roleSelect_${userId}`).value;
+        const result = await API.updateUser(userId, { role: newRole });
+        if (result) {
+            showAlert(`'${username}' role changed to '${newRole}'`, 'success');
+            loadUsers();
+        }
     }
 
     async function toggleActive(userId, newActive) {
