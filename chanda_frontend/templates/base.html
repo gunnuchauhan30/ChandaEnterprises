@@ -178,14 +178,16 @@
             // when every item under them is hidden, so no orphaned "Reporting"
             // label sits above nothing.
             if (user.role !== 'admin') {
+                // navInventory is shown to every role -- everyone can see
+                // stock levels, only actions stay role-restricted.
                 const roleNavMap = {
                     store_manager: ['navMaterials', 'navSuppliers', 'navInventory', 'navCriticalSpares', 'navPurchases', 'navRequests', 'navIssues', 'navRouteCard', 'navReturns', 'navAlerts'],
-                    purchase:      ['navMaterials', 'navSuppliers', 'navPurchases', 'navAlerts', 'navReports'],
-                    production:    ['navRequests', 'navRouteCard', 'navAlerts'],
-                    quality:       ['navPurchases', 'navAlerts'],
-                    management:    ['navReports', 'navAlerts'],
-                    operation:     ['navRequests', 'navAlerts'],
-                    accounts:      ['navPurchases', 'navIssues', 'navReports', 'navAlerts'],
+                    purchase:      ['navMaterials', 'navSuppliers', 'navInventory', 'navPurchases', 'navAlerts', 'navReports'],
+                    production:    ['navInventory', 'navRequests', 'navRouteCard', 'navAlerts'],
+                    quality:       ['navInventory', 'navPurchases', 'navAlerts'],
+                    management:    ['navInventory', 'navReports', 'navAlerts'],
+                    operation:     ['navInventory', 'navRequests', 'navAlerts'],
+                    accounts:      ['navInventory', 'navPurchases', 'navIssues', 'navReports', 'navAlerts'],
                 };
                 const allowed = new Set(roleNavMap[user.role] || []);
                 const allNavIds = ['navMaterials', 'navSuppliers', 'navInventory', 'navCriticalSpares', 'navPurchases',
