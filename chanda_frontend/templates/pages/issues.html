@@ -219,13 +219,17 @@
         try {
             const source = await API.getIssueFifoSource(issueId);
             if (!source || !source.allocation || !source.allocation.length) {
-                box.innerHTML = 'No batch recorded for this issue (it was issued before this material had any stock_batches on record).';
+                box.innerHTML = 'No batch data available for this issue (nothing in stock right now to estimate from either).';
                 return;
             }
+            const estimateBanner = source.is_estimate ? `
+                <div style="background:rgba(245,158,11,0.12); border:1px solid rgba(245,158,11,0.4); border-radius:8px; padding:8px 12px; margin-bottom:12px; font-size:12px; color:#f59e0b;">
+                    ⚠️ Estimated — this issue predates per-batch tracking, so this is calculated from TODAY's stock, not the actual batches used at the time.
+                </div>` : '';
             // Exact same numbered-circle flow card as /issues/fifo-preview
             // (New Issue -> Confirm & Create Issue screen), so both places
             // look and read identically.
-            box.innerHTML = source.allocation.map((item, idx) => {
+            box.innerHTML = estimateBanner + source.allocation.map((item, idx) => {
                 const isLast = idx === source.allocation.length - 1;
                 return `
                 <div style="display:flex; align-items:stretch; gap:12px; margin-bottom: ${isLast ? '0' : '10px'};">
