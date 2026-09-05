@@ -402,32 +402,68 @@ def issue_fifo_source(
 
     # Fallback for issues approved before this table existed: old single
     # lot_no view (first/oldest batch only, not necessarily the full split).
-    if not issue.lot_no:
-        return {"issue_id": issue.id, "issue_qty": float(issue.issue_qty), "allocation": []}
+    if issue.lot_no:
+        batch, supplier_name = (
+            db.query(StockBatch, Supplier.supplier_name)
+            .outerjoin(Purchase, StockBatch.purchase_id == Purchase.id)
+            .outerjoin(Supplier, Purchase.supplier_id == Supplier.id)
+            .filter(StockBatch.material_code == issue.material_code, StockBatch.batch_no == issue.lot_no)
+            .first()
+        ) or (None, None)
 
-    batch, supplier_name = (
+        if batch:
+            available_now = float(batch.remaining_qty)
+            return {
+                "issue_id": issue.id,
+                "issue_qty": float(issue.issue_qty),
+                "allocation": [{
+                    "supplier_name": supplier_name or "Direct / Unassigned",
+                    "batch_no": issue.lot_no,
+                    "received_date": batch.received_date.isoformat() if batch.received_date else None,
+                    "available": available_now,
+                    "issue_qty": float(issue.issue_qty),
+                    "remaining_after": available_now,
+                }],
+            }
+
+    # Last resort for issues that predate ALL of this tracking (no
+    # allocation rows, no lot_no either -- e.g. old requests-based auto
+    # issues): simulate FIFO against TODAY's stock_batches, same logic as
+    # the New Issue preview (fifo_check). This is clearly an ESTIMATE, not
+    # the real historical record -- the actual batches on hand have moved
+    # on since this issue happened. is_estimate=True tells the frontend to
+    # label it as such.
+    batches = (
         db.query(StockBatch, Supplier.supplier_name)
         .outerjoin(Purchase, StockBatch.purchase_id == Purchase.id)
         .outerjoin(Supplier, Purchase.supplier_id == Supplier.id)
-        .filter(StockBatch.material_code == issue.material_code, StockBatch.batch_no == issue.lot_no)
-        .first()
-    ) or (None, None)
+        .filter(StockBatch.material_code == issue.material_code, StockBatch.remaining_qty > 0)
+        .order_by(StockBatch.received_date.asc(), StockBatch.id.asc())
+        .all()
+    )
+    remaining_needed = float(issue.issue_qty)
+    estimated_allocation = []
+    for batch, supplier_name in batches:
+        if remaining_needed <= 0:
+            break
+        available = float(batch.remaining_qty)
+        take = min(available, remaining_needed)
+        estimated_allocation.append({
+            "supplier_name": supplier_name or "Direct / Unassigned",
+            "batch_no": batch.batch_no,
+            "received_date": batch.received_date.isoformat() if batch.received_date else None,
+            "available": available,
+            "issue_qty": take,
+            "remaining_after": available - take,
+        })
+        remaining_needed -= take
 
-    if not batch:
-        return {"issue_id": issue.id, "issue_qty": float(issue.issue_qty), "allocation": []}
-
-    available_now = float(batch.remaining_qty)
     return {
         "issue_id": issue.id,
         "issue_qty": float(issue.issue_qty),
-        "allocation": [{
-            "supplier_name": supplier_name or "Direct / Unassigned",
-            "batch_no": issue.lot_no,
-            "received_date": batch.received_date.isoformat() if batch.received_date else None,
-            "available": available_now,
-            "issue_qty": float(issue.issue_qty),
-            "remaining_after": available_now,
-        }],
+        "allocation": estimated_allocation,
+        "is_estimate": True,
+        "note": "No historical batch record exists for this issue (it predates per-batch tracking). This is an ESTIMATE based on today's stock, not the actual batches used at the time.",
     }
 
 
