@@ -4,8 +4,23 @@
 
 {% block content %}
 <div class="container-fluid" style="max-width: 1400px; margin: 0 auto;">
-    <div style="display: flex; justify-content: flex-end; margin-bottom: 20px;">
-        <a href="/issues/new" class="btn btn-primary"><i class="bi bi-plus"></i> Create Issue From Request</a>
+
+    <!-- Approved requests, ready to be issued -- shown directly here as
+         rows (no separate "New Issue" page/button). Store fills the qty
+         and clicks Issue right on this row. -->
+    <div id="readyToIssueSection" class="glass card-3d" style="padding: 24px; border-radius: 12px; margin-bottom: 24px; display:none;">
+        <h3 style="margin: 0 0 16px; font-size: 16px; color: var(--accent-purple);"><i class="bi bi-clipboard-check"></i> Approved Requests — Ready to Issue</h3>
+        <div class="table-container">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Request No</th><th>Material</th><th>Raised By</th><th>Department</th>
+                        <th>Pending Qty</th><th>Issue Qty</th><th></th>
+                    </tr>
+                </thead>
+                <tbody id="readyToIssueBody"></tbody>
+            </table>
+        </div>
     </div>
 
     <div class="glass card-3d" style="padding: 24px; border-radius: 12px;">
@@ -67,7 +82,62 @@
     let currentPage = 1;
     const pageSize = 20;
 
-    document.addEventListener('DOMContentLoaded', () => loadIssues());
+    document.addEventListener('DOMContentLoaded', () => {
+        loadIssues();
+        loadReadyToIssue();
+    });
+
+    async function loadReadyToIssue() {
+        const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
+        const canIssue = currentUser.role === 'store_manager' || currentUser.role === 'admin';
+        const section = document.getElementById('readyToIssueSection');
+        if (!canIssue) { section.style.display = 'none'; return; }
+
+        const [approved, partial] = await Promise.all([
+            API.getRequests(1, 100, { status: 'approved' }),
+            API.getRequests(1, 100, { status: 'partial' }),
+        ]);
+        const all = [...((approved && approved.items) || []), ...((partial && partial.items) || [])];
+        const ready = all.filter(r => (r.requested_qty - (r.fulfilled_qty || 0)) > 0);
+
+        const tbody = document.getElementById('readyToIssueBody');
+        if (ready.length === 0) {
+            section.style.display = 'none';
+            return;
+        }
+        section.style.display = 'block';
+        tbody.innerHTML = ready.map(r => {
+            const pending = (r.requested_qty - (r.fulfilled_qty || 0));
+            return `
+                <tr>
+                    <td>${r.request_no}</td>
+                    <td>${r.material_code}${r.material_name ? '<br><span style="color:var(--text-lighter); font-size:11px;">' + r.material_name + '</span>' : ''}</td>
+                    <td>${r.raised_by_name || '-'}</td>
+                    <td>${r.department || '-'}</td>
+                    <td>${pending}</td>
+                    <td><input type="number" id="issueQty_${r.id}" value="${pending}" max="${pending}" min="0.01" step="0.01" style="width:100px; padding:6px 8px; background: var(--glass-dark); border:1px solid var(--glass-medium); border-radius:6px; color:var(--text-light);"></td>
+                    <td><button class="btn btn-sm btn-primary" onclick="issueFromRequest(${r.id}, ${pending})"><i class="bi bi-box-arrow-up-right"></i> Issue</button></td>
+                </tr>
+            `;
+        }).join('');
+    }
+
+    async function issueFromRequest(requestId, pending) {
+        const qtyInput = document.getElementById(`issueQty_${requestId}`);
+        const qty = parseFloat(qtyInput.value);
+        if (!qty || qty <= 0 || qty > pending) {
+            showAlert(`Enter a valid quantity (up to ${pending}).`, 'danger');
+            return;
+        }
+        if (!confirm(`Create an issue for ${qty}? Stock will NOT move until Accounts approves it.`)) return;
+
+        const result = await API.createIssueFromRequest(requestId, { issue_qty: qty });
+        if (result) {
+            showAlert(`Issue ${result.issue_no} created -- awaiting Accounts approval before stock moves.`, 'success');
+            loadReadyToIssue();
+            loadIssues();
+        }
+    }
 
     async function loadIssues() {
         const response = await API.getIssues(currentPage, pageSize);
